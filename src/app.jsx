@@ -2947,7 +2947,8 @@ function VideoCheck({ app, known }) {
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
   useEffect(() => { if (vref.current) vref.current.playbackRate = rate; }, [rate, url]);
   if (!opts.length) return null;
-  const T = TECH[tech];
+  const techId = opts.includes(tech) ? tech : opts[opts.length - 1];
+  const T = TECH[techId];
   const items = [...T.points(lefty), 'Kein Fehler: ' + T.mistake];
   const onFile = e => { const f = e.target.files && e.target.files[0]; if (!f) return; if (url) URL.revokeObjectURL(url); setUrl(URL.createObjectURL(f)); setChecks({}); e.target.value = ''; };
   const finish = () => { update(s => ({ ...s, videoLog: [...s.videoLog, tKey] })); toast('🎥 Video-Check gespeichert'); setUrl(null); setChecks({}); };
@@ -2955,7 +2956,7 @@ function VideoCheck({ app, known }) {
     <Card className="border-gold/30">
       <H2 sub="Film dich und vergleiche mit der richtigen Technik">🎥 Technik-Check per Video</H2>
       <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-        {opts.map(id => <button key={id} onClick={() => { setTech(id); setChecks({}); }} className={'shrink-0 rounded-full border px-3 py-1.5 text-xs ' + (tech === id ? 'border-gold bg-gold text-ink' : 'border-white/10 bg-coal text-stone-300')}>{TECH[id].name}</button>)}
+        {opts.map(id => <button key={id} onClick={() => { setTech(id); setChecks({}); }} className={'shrink-0 rounded-full border px-3 py-1.5 text-xs ' + (techId === id ? 'border-gold bg-gold text-ink' : 'border-white/10 bg-coal text-stone-300')}>{TECH[id].name}</button>)}
       </div>
       <input ref={fref} type="file" accept="video/*" className="hidden" onChange={onFile} />
       {!url ? (
@@ -3080,4 +3081,21 @@ function HomeExtras({ app }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err) { try { console.error(err); } catch (e) { } }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: '#e7e3da', fontFamily: 'Inter, system-ui, sans-serif' }}>
+        <div style={{ fontSize: 56 }}>🥊</div>
+        <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: 26, textTransform: 'uppercase', color: '#d4af37', marginTop: 12 }}>Kurzer K.o.</div>
+        <p style={{ marginTop: 8, color: '#a8a29e', maxWidth: 320 }}>Da ist etwas schiefgelaufen. Dein Fortschritt ist gespeichert. Tippe auf den Knopf, um weiterzumachen.</p>
+        <button onClick={() => { try { location.reload(); } catch (e) { this.setState({ err: null }); } }} style={{ marginTop: 20, background: '#b3121b', color: '#fff', border: 0, borderRadius: 16, padding: '14px 28px', fontFamily: 'Oswald, sans-serif', fontSize: 18, textTransform: 'uppercase', letterSpacing: 1 }}>Weitermachen</button>
+        <p style={{ marginTop: 16, fontSize: 11, color: '#57534e' }}>{String(this.state.err && this.state.err.message || '').slice(0, 120)}</p>
+      </div>
+    );
+  }
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
