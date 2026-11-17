@@ -61,17 +61,23 @@ function beep(n = 3, f = 1320) {
 }
 
 /* ---------- Speech ---------- */
-function deVoice() {
+const VOICE_PREF = { name: null, pitch: 0.95 };
+function allDeVoices() {
   try {
     const vs = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
-    return vs.find(v => v.lang && v.lang.toLowerCase() === 'de-de') || vs.find(v => v.lang && v.lang.toLowerCase().startsWith('de')) || null;
-  } catch (e) { return null; }
+    return vs.filter(v => v.lang && v.lang.toLowerCase().replace('_', '-').startsWith('de'));
+  } catch (e) { return []; }
+}
+function deVoice() {
+  const vs = allDeVoices();
+  if (VOICE_PREF.name) { const m = vs.find(v => v.name === VOICE_PREF.name); if (m) return m; }
+  return vs.find(v => v.lang.toLowerCase().replace('_', '-') === 'de-de') || vs[0] || null;
 }
 function speak(text, rate = 1.15, interrupt = true) {
   try {
     const s = window.speechSynthesis; if (!s || !text) return;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'de-DE'; const v = deVoice(); if (v) u.voice = v; u.rate = rate; u.pitch = 0.95;
+    const v = deVoice(); u.lang = v ? v.lang : 'de-DE'; if (v) u.voice = v; u.rate = rate; u.pitch = VOICE_PREF.pitch;
     if (interrupt) s.cancel();
     s.speak(u);
   } catch (e) { }
@@ -248,7 +254,7 @@ const DAYS = [
 const DEFAULT_STATE = {
   v: 1, updatedAt: 0,
   profile: { name: '', hand: 'r', weight: 75, height: 178, age: 30, sex: 'm', goal: 'halten', activity: 1.725 },
-  settings: { voiceOn: true, rate: 1.05, intMin: 8, intMax: 12, level: 'einsteiger' },
+  settings: { voiceName: null, pitch: 0.95, voiceOn: true, rate: 1.05, intMin: 8, intMax: 12, level: 'einsteiger' },
   onboarded: false,
   goals: { train: true, water: true, food: true, sleep: true, waterL: null, sleepH: 7, custom: [] },
   equip: { bag: true, gloves: true, wraps: true, knuckle: true, bar: true, pads: false },
@@ -2143,6 +2149,42 @@ function MoreTab({ app, sub, setSub, focusWarmup }) {
   );
 }
 
+
+function VoicePicker({ st, setSt }) {
+  const [voices, setVoices] = useState(allDeVoices());
+  useEffect(() => {
+    const load = () => setVoices(allDeVoices());
+    load(); const iv = setInterval(load, 1000); const to = setTimeout(() => clearInterval(iv), 6000);
+    try { window.speechSynthesis && window.speechSynthesis.addEventListener('voiceschanged', load); } catch (e) { }
+    return () => { clearInterval(iv); clearTimeout(to); try { window.speechSynthesis.removeEventListener('voiceschanged', load); } catch (e) { } };
+  }, []);
+  const current = (deVoice() || {}).name;
+  const label = v => {
+    const reg = { 'de-de': 'Deutschland', 'de-ch': 'Schweiz', 'de-at': 'Österreich' }[v.lang.toLowerCase().replace('_', '-')] || v.lang;
+    const q = /premium/i.test(v.name) ? ' · Premium' : /enhanced|erweitert/i.test(v.name) ? ' · Erweitert' : '';
+    return { name: v.name.replace(/\s*\((Premium|Enhanced|Erweitert)\)/i, ''), sub: reg + q };
+  };
+  const pickAndTest = v => { setSt({ voiceName: v.name }); VOICE_PREF.name = v.name; ac(); speak('Hallo! Ich bin dein Box-Coach. Eins, zwei, Hände hoch!', st.rate); };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-stone-500">Stimme wählen ({voices.length})</div>
+      {voices.length === 0 ? <p className="mt-2 text-sm text-stone-400">Keine deutsche Stimme gefunden. Tippe auf «Testen» und versuch es danach nochmal.</p> : (
+        <div className="mt-2 space-y-1.5">
+          {voices.map(v => { const l = label(v), on = current === v.name; return (
+            <button key={v.name + v.lang} onClick={() => pickAndTest(v)} className={'flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ' + (on ? 'border-gold bg-gold/15' : 'border-white/10 bg-coal')}>
+              <span className="text-lg">{on ? '🔊' : '🗣️'}</span>
+              <span className="flex-1"><span className={'block text-sm ' + (on ? 'text-gold' : 'text-stone-100')}>{l.name}</span><span className="block text-[11px] text-stone-500">{l.sub}</span></span>
+              <span className="text-xs text-stone-500">{on ? 'aktiv' : 'anhören'}</span>
+            </button>
+          ); })}
+        </div>
+      )}
+      <div className="mt-2"><Btn kind="ghost" onClick={() => { ac(); speak('Eins, zwei! Hände hoch!', st.rate); }}>🔊 Testen</Btn></div>
+      <p className="mt-2 text-xs text-stone-500">Mehr und bessere Stimmen (z. B. «Premium»): iPhone-Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen → Deutsch. Dort eine Stimme laden, dann die App neu öffnen.</p>
+    </div>
+  );
+}
+
 function SettingsPanel({ app }) {
   const { state, update } = app;
   const st = state.settings, eq = state.equip, pr = state.profile;
@@ -2167,7 +2209,11 @@ function SettingsPanel({ app }) {
             <div className="flex justify-between text-xs uppercase tracking-wider text-stone-500"><span>Sprechtempo</span><span className="text-gold">{(+st.rate).toFixed(2)}×</span></div>
             <input type="range" min="0.8" max="1.5" step="0.05" value={st.rate} onChange={e => setSt({ rate: +e.target.value })} className="mt-2 w-full accent-[#d4af37]" />
           </label>
-          <Btn kind="ghost" onClick={() => { ac(); speak('Eins, zwei! Hände hoch!', st.rate); }}>🔊 Testen</Btn>
+          <label className="block">
+            <div className="flex justify-between text-xs uppercase tracking-wider text-stone-500"><span>Tonhöhe</span><span className="text-gold">{st.pitch < 0.9 ? 'tief' : st.pitch > 1.1 ? 'hoch' : 'normal'}</span></div>
+            <input type="range" min="0.6" max="1.4" step="0.05" value={st.pitch} onChange={e => setSt({ pitch: +e.target.value })} className="mt-2 w-full accent-[#d4af37]" />
+          </label>
+          <VoicePicker st={st} setSt={setSt} />
         </div>
       </Card>
       <Card>
@@ -2261,6 +2307,7 @@ function App() {
   });
   useEffect(() => { const i = setInterval(() => setTKey(todayKey()), 60000); return () => clearInterval(i); }, []);
 
+  VOICE_PREF.name = state.settings.voiceName || null; VOICE_PREF.pitch = state.settings.pitch || 0.95;
   const d = useMemo(() => derive(state), [state]);
   const today = getDay(state, tKey);
   const toast = msg => { const id = Math.random(); setToasts(t => [...t, { id, msg }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000); };
