@@ -254,8 +254,9 @@ const DAYS = [
 const DEFAULT_STATE = {
   v: 1, updatedAt: 0,
   profile: { name: '', hand: 'r', weight: 75, height: 178, age: 30, sex: 'm', goal: 'halten', activity: 1.725 },
-  settings: { voiceName: null, pitch: 0.95, voiceOn: true, rate: 1.05, intMin: 8, intMax: 12, level: 'einsteiger' },
+  settings: { intensity: 'mittel', voiceName: null, pitch: 0.95, voiceOn: true, rate: 1.05, intMin: 8, intMax: 12, level: 'einsteiger' },
   onboarded: false,
+  log: [], weights: [], favs: [], combos: [], myWorkouts: [], challenges: {}, videoLog: [], shop: {},
   goals: { train: true, water: true, food: true, sleep: true, waterL: null, sleepH: 7, custom: [] },
   equip: { bag: true, gloves: true, wraps: true, knuckle: true, bar: true, pads: false },
   path: { done: [], adjust: 0, last: null },
@@ -277,6 +278,9 @@ function mergeState(raw) {
     history: s.history || {},
     unlocked: Array.isArray(s.unlocked) ? s.unlocked : [],
     trophies: Array.isArray(s.trophies) ? s.trophies : [],
+    log: Array.isArray(s.log) ? s.log : [], weights: Array.isArray(s.weights) ? s.weights : [], favs: Array.isArray(s.favs) ? s.favs : [],
+    combos: Array.isArray(s.combos) ? s.combos : [], myWorkouts: Array.isArray(s.myWorkouts) ? s.myWorkouts : [], videoLog: Array.isArray(s.videoLog) ? s.videoLog : [],
+    challenges: (s.challenges && typeof s.challenges === 'object') ? s.challenges : {}, shop: (s.shop && typeof s.shop === 'object') ? s.shop : {},
   };
 }
 const getDay = (state, key) => ({ ...EMPTY_DAY, ...(state.history[key] || {}) });
@@ -319,7 +323,14 @@ function derive(state) {
     if (r.champ) champ = true; if (r.warmup) warmups++; if (r.water >= n.glasses) hydro++;
     if (r.workout && !r.sessions) sessions += 1;
   });
-  const xp = base + state.trophies.length * 100;
+  const chXP = Object.values(state.challenges).reduce((a, v) => a + (Array.isArray(v) ? v.length : 0), 0) * 50;
+  const xp = base + state.trophies.length * 100 + chXP;
+  const totals = state.log.reduce((a, l) => ({ sessions: a.sessions + 1, minutes: a.minutes + (l.min || 0), rounds: a.rounds + (l.rounds || 0), punches: a.punches + (l.punches || 0) }), { sessions: 0, minutes: 0, rounds: 0, punches: 0 });
+  const best = state.log.reduce((a, l) => ({ min: Math.max(a.min, l.min || 0), rounds: Math.max(a.rounds, l.rounds || 0), punches: Math.max(a.punches, l.punches || 0) }), { min: 0, rounds: 0, punches: 0 });
+  const trainedDays = keys.filter(k => getDay(state, k).workout).sort();
+  let longest = 0, run = 0, prev = null;
+  trainedDays.forEach(k => { run = prev && addDays(prev, 1) === k ? run + 1 : 1; longest = Math.max(longest, run); prev = k; });
+  const challengesDone = Object.values(state.challenges).reduce((a, v) => a + (Array.isArray(v) ? v.length : 0), 0);
   // streak
   const t = todayKey(); let streak = 0;
   let k = getDay(state, t).workout ? t : addDays(t, -1);
@@ -328,11 +339,15 @@ function derive(state) {
   const rank = RANKS[ri], next = RANKS[ri + 1] || null;
   const prog = next ? (xp - rank.xp) / (next.xp - rank.xp) : 1;
   const basics = state.path.done.length;
-  return { n, basics, xp, base, streak, pullups, speed, champ, warmups, hydro, sessions, rank, next, prog, ri };
+  return { totals, best, longest, challengesDone, videos: state.videoLog.length, n, basics, xp, base, streak, pullups, speed, champ, warmups, hydro, sessions, rank, next, prog, ri };
 }
 
 const TROPHIES = [
   { id: 'basic', name: 'Grundausbildung bestanden', desc: 'Alle 12 Anfänger-Lektionen geschafft', test: d => d.basics >= 12 },
+  { id: 'advanced', name: 'Fortgeschritten', desc: 'Alle 24 Lektionen geschafft', test: d => d.basics >= 24 },
+  { id: 'punch10k', name: '10 000 Schläge', desc: 'Geschätzt 10 000 Schläge gesamt', test: d => d.totals.punches >= 10000 },
+  { id: 'video5', name: 'Kritischer Blick', desc: '5 Technik-Checks per Video', test: d => d.videos >= 5 },
+  { id: 'chall3', name: 'Challenge-Jäger', desc: '3 Wochen-Challenges geschafft', test: d => d.challengesDone >= 3 },
   { id: 'first', name: 'Erste Glocke', desc: 'Erstes Workout abgeschlossen', test: d => d.sessions >= 1 },
   { id: 'streak7', name: '7-Tage-Streak', desc: '7 Tage in Folge trainiert', test: d => d.streak >= 7 },
   { id: 'streak30', name: 'Eiserne Disziplin', desc: '30 Tage in Folge trainiert', test: d => d.streak >= 30 },
@@ -495,6 +510,7 @@ function TimerPanel({ app }) {
   doneRef.current = () => {
     const c = cfgRef.current;
     updateToday(r => ({ ...r, workout: true, sessions: (r.sessions || 0) + 1, speed: (r.speed || 0) + (c.knuckle ? 1 : 0), champ: r.champ || (c.rounds >= 12 && c.work >= 180) }));
+    if (app.addLog) app.addLog({ title: cfgRef.current.label || 'Freier Timer', kind: 'timer', min: Math.max(1, Math.round((c.rounds * c.work + (c.rounds - 1) * c.rest) / 60)), rounds: c.rounds, punches: Math.round(c.rounds * c.work / 60 * 20) });
     toast('Workout abgeschlossen – stark, Champion!');
   };
 
@@ -1268,49 +1284,72 @@ const Arrow = ({ id }) => (
 
 function Feet({ variant = 'stance', lefty }) {
   const m = x => lefty ? 200 - x : x, r = a => lefty ? -a : a;
+  const id = 'fa' + variant + (lefty ? 'l' : 'r');
   const foot = (x, y, rot, ghost) => (
     <g transform={`translate(${m(x)} ${y}) rotate(${r(rot)})`} opacity={ghost ? 0.35 : 1}>
       <ellipse cx="0" cy="6" rx="15" ry="27" fill={ghost ? 'none' : SKIN} stroke={ghost ? GOLD : LINE} strokeDasharray={ghost ? '4 3' : ''} strokeWidth="2" />
       {[-9, -3, 3, 9].map((tx, i) => <circle key={i} cx={tx} cy={-25 + Math.abs(tx) * 0.4} r="3.4" fill={ghost ? 'none' : SKIN} stroke={LINE} />)}
     </g>
   );
+  const front = foot(78, 72, 12), rear = foot(126, 146, 42);
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full" aria-hidden="true">
-      <Arrow id={'fa' + variant} />
-      <line x1={m(100)} y1="30" x2={m(100)} y2="6" stroke={RED} strokeWidth="3" markerEnd={'url(#fa' + variant + ')'} />
+      <Arrow id={id} />
+      <line x1={m(100)} y1="30" x2={m(100)} y2="6" stroke={RED} strokeWidth="3" markerEnd={'url(#' + id + ')'} />
       {variant === 'pivot' && foot(140, 120, 80, true)}
-      {foot(78, 72, 12)}
-      {foot(126, 146, 42)}
+      {variant === 'step' ? (
+        <>
+          <g><animateTransform attributeName="transform" type="translate" values="0 0;0 -22;0 -22;0 -22;0 0" keyTimes="0;0.25;0.5;0.75;1" dur="2.4s" repeatCount="indefinite" />{front}</g>
+          <g><animateTransform attributeName="transform" type="translate" values="0 0;0 0;0 -22;0 -22;0 0" keyTimes="0;0.25;0.5;0.75;1" dur="2.4s" repeatCount="indefinite" />{rear}</g>
+        </>
+      ) : variant === 'pivot' ? (
+        <>
+          {front}
+          <g><animateTransform attributeName="transform" type="rotate" values={`0 ${m(78)} 72;${r(-38)} ${m(78)} 72;${r(-38)} ${m(78)} 72;0 ${m(78)} 72`} keyTimes="0;0.4;0.7;1" dur="2.6s" repeatCount="indefinite" />{rear}</g>
+        </>
+      ) : <>{front}{rear}</>}
       {variant === 'stance' && <line x1={m(78)} y1="110" x2={m(126)} y2="110" stroke={GOLD} strokeWidth="2" strokeDasharray="5 4" />}
       {variant === 'step' && <>
-        <line x1={m(48)} y1="90" x2={m(48)} y2="44" stroke={GOLD} strokeWidth="4" markerEnd={'url(#fa' + variant + ')'} />
-        <line x1={m(160)} y1="168" x2={m(160)} y2="128" stroke={GOLD} strokeWidth="3" strokeOpacity="0.6" markerEnd={'url(#fa' + variant + ')'} />
+        <line x1={m(48)} y1="90" x2={m(48)} y2="44" stroke={GOLD} strokeWidth="4" markerEnd={'url(#' + id + ')'} />
+        <line x1={m(160)} y1="168" x2={m(160)} y2="128" stroke={GOLD} strokeWidth="3" strokeOpacity="0.6" markerEnd={'url(#' + id + ')'} />
       </>}
-      {variant === 'pivot' && <path d={`M${m(108)} 166 Q${m(150)} 160 ${m(160)} 128`} fill="none" stroke={GOLD} strokeWidth="3" markerEnd={'url(#fa' + variant + ')'} />}
+      {variant === 'pivot' && <path d={`M${m(108)} 166 Q${m(150)} 160 ${m(160)} 128`} fill="none" stroke={GOLD} strokeWidth="3" markerEnd={'url(#' + id + ')'} />}
     </svg>
   );
 }
 
+const PUNCH_PATHS = {
+  jab: 'M74 98 L90 44',
+  cross: 'M120 108 L106 44',
+  lhook: 'M74 98 C30 74 46 34 90 32',
+  rhook: 'M120 108 C174 82 152 34 110 32',
+  feint: 'M74 98 L80 76',
+  checkhook: 'M74 98 C30 74 46 34 90 32',
+};
 function TopView({ punch, lefty }) {
-  const id = 'tv' + punch;
-  const paths = {
-    jab: 'M74 88 L90 44',
-    cross: 'M120 98 L106 44',
-    lhook: 'M64 96 C28 70 46 34 90 32',
-    rhook: 'M128 104 C174 82 152 34 110 32',
-  };
+  const id = 'tv' + punch + (lefty ? 'l' : 'r');
+  const rearPunch = punch === 'cross' || punch === 'rhook' || punch === 'pull';
+  const path = punch === 'pull' ? PUNCH_PATHS.cross : PUNCH_PATHS[punch];
+  const moving = !!path;
+  const fist = (cx, cy, animPath) => animPath ? (
+    <circle r="11" fill={RED}><animateMotion path={animPath} dur={punch === 'feint' ? '1.2s' : '1.8s'} repeatCount="indefinite" keyPoints="0;0;1;0;0" keyTimes="0;0.2;0.45;0.7;1" calcMode="linear" /></circle>
+  ) : <circle cx={cx} cy={cy} r="11" fill={RED} />;
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full" aria-hidden="true">
       <Arrow id={id} />
       <g transform={lefty ? 'translate(200 0) scale(-1 1)' : ''}>
         <circle cx="100" cy="22" r="17" fill="#2a2a2e" stroke={GOLD} strokeDasharray="4 3" />
-        <ellipse cx="100" cy="142" rx="52" ry="18" transform="rotate(-16 100 142)" fill={SKIN} stroke={LINE} strokeWidth="2" />
-        <circle cx="104" cy="130" r="18" fill="#4a4a50" stroke={LINE} strokeWidth="2" />
-        <line x1="62" y1="150" x2="74" y2="104" stroke={LINE} strokeWidth="9" strokeLinecap="round" />
-        <line x1="146" y1="128" x2="122" y2="112" stroke={LINE} strokeWidth="9" strokeLinecap="round" />
-        <circle cx="74" cy="98" r="11" fill={RED} />
-        <circle cx="120" cy="108" r="11" fill={RED} />
-        {paths[punch] && <path d={paths[punch]} fill="none" stroke={GOLD} strokeWidth="5" strokeLinecap="round" markerEnd={'url(#' + id + ')'} />}
+        {path && <path d={punch === 'feint' ? 'M74 88 L82 66' : path} fill="none" stroke={GOLD} strokeWidth="4" strokeLinecap="round" strokeOpacity="0.45" strokeDasharray={punch === 'feint' ? '5 4' : ''} markerEnd={'url(#' + id + ')'} />}
+        <g>
+          {punch === 'pull' && <animateTransform attributeName="transform" type="translate" values="0 0;0 18;0 18;0 0;0 0" keyTimes="0;0.2;0.45;0.6;1" dur="1.8s" repeatCount="indefinite" />}
+          {punch === 'checkhook' && <animateTransform attributeName="transform" type="rotate" values="0 100 140;0 100 140;-30 100 140;-30 100 140;0 100 140" keyTimes="0;0.3;0.55;0.8;1" dur="1.8s" repeatCount="indefinite" />}
+          <ellipse cx="100" cy="142" rx="52" ry="18" transform="rotate(-16 100 142)" fill={SKIN} stroke={LINE} strokeWidth="2" />
+          <circle cx="104" cy="130" r="18" fill="#4a4a50" stroke={LINE} strokeWidth="2" />
+          <line x1="62" y1="150" x2="74" y2="104" stroke={LINE} strokeWidth="9" strokeLinecap="round" />
+          <line x1="146" y1="128" x2="122" y2="112" stroke={LINE} strokeWidth="9" strokeLinecap="round" />
+          {fist(74, 98, moving && !rearPunch ? path : null)}
+          {fist(120, 108, moving && rearPunch ? path : null)}
+        </g>
         {punch === 'cross' && <path d="M60 176 Q100 192 142 168" fill="none" stroke={GOLD} strokeWidth="3" strokeOpacity="0.7" markerEnd={'url(#' + id + ')'} />}
       </g>
     </svg>
@@ -1318,29 +1357,28 @@ function TopView({ punch, lefty }) {
 }
 
 function FrontView({ pose = 'guard', lefty }) {
-  const id = 'fv' + pose;
-  let hx = 100, hy = 46, lf = [80, 56], rf = [120, 56], dy = 0;
-  if (pose === 'slip') { hx = 78; lf = [60, 60]; rf = [100, 58]; }
-  if (pose === 'roll') { hy = 70; dy = 18; lf = [80, 74]; rf = [120, 74]; }
-  if (pose === 'block') { rf = [124, 36]; }
-  if (pose === 'body') { hy = 58; dy = 12; lf = [78, 112]; }
-  if (pose === 'upper') { lf = [80, 104]; }
+  const id = 'fv' + pose + (lefty ? 'l' : 'r');
+  const anim = (values, dur = '2s', keyTimes) => <animateTransform attributeName="transform" type="translate" values={values} keyTimes={keyTimes} dur={dur} repeatCount="indefinite" />;
+  const headAnim = { slip: anim('0 0;-24 4;-24 4;0 0;0 0', '2s', '0;0.25;0.5;0.75;1'), roll: anim('0 0;20 18;0 30;-20 18;0 0', '2.2s', '0;0.25;0.5;0.75;1'), body: anim('0 0;0 14;0 14;0 0', '2s', '0;0.3;0.7;1'), pull: anim('0 0;0 -6;0 -6;0 0', '2s', '0;0.3;0.6;1') }[pose];
+  const lfAnim = { upper: 'M80 100 Q74 60 92 30', body: 'M80 60 Q66 90 40 108', parry: 'M80 58 L104 50 L80 58' }[pose];
+  const rfAnim = { block: 'M120 56 L124 36 L124 36 L120 56' }[pose];
+  const fist = (pos, p) => p ? <circle r="12" fill={RED}><animateMotion path={p} dur="2s" repeatCount="indefinite" keyPoints="0;1;1;0" keyTimes="0;0.35;0.6;1" calcMode="linear" /></circle> : <circle cx={pos[0]} cy={pos[1]} r="12" fill={RED} />;
   return (
     <svg viewBox="0 0 200 200" className="h-full w-full" aria-hidden="true">
       <Arrow id={id} />
       <g transform={lefty ? 'translate(200 0) scale(-1 1)' : ''}>
-        {(pose === 'slip' || pose === 'roll') && <circle cx="100" cy="46" r="19" fill="none" stroke={GOLD} strokeDasharray="4 3" opacity="0.5" />}
-        <rect x={68} y={76 + dy} width="64" height={92 - dy} rx="16" fill={SKIN} stroke={LINE} strokeWidth="2" />
-        <circle cx={hx} cy={hy} r="19" fill="#4a4a50" stroke={LINE} strokeWidth="2" />
-        <polyline points={`72,${86 + dy} 74,${108 + dy / 2} ${lf[0]},${lf[1]}`} fill="none" stroke={LINE} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points={`128,${86 + dy} 126,${108 + dy / 2} ${rf[0]},${rf[1]}`} fill="none" stroke={LINE} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={lf[0]} cy={lf[1]} r="12" fill={RED} />
-        <circle cx={rf[0]} cy={rf[1]} r="12" fill={RED} />
-        {pose === 'slip' && <path d="M98 16 L70 16" stroke={GOLD} strokeWidth="4" markerEnd={'url(#' + id + ')'} />}
-        {pose === 'roll' && <path d="M140 30 Q100 120 60 30" fill="none" stroke={GOLD} strokeWidth="4" markerEnd={'url(#' + id + ')'} />}
-        {pose === 'upper' && <path d="M80 92 Q74 54 92 24" fill="none" stroke={GOLD} strokeWidth="5" markerEnd={'url(#' + id + ')'} />}
-        {pose === 'body' && <path d="M60 108 L30 108" stroke={GOLD} strokeWidth="5" markerEnd={'url(#' + id + ')'} />}
-        {pose === 'guard' && <path d="M40 190 L160 190" stroke={GOLD} strokeWidth="0" />}
+        {(pose === 'slip' || pose === 'roll') && <circle cx="100" cy="46" r="19" fill="none" stroke={GOLD} strokeDasharray="4 3" opacity="0.4" />}
+        <rect x={68} y={76} width="64" height={92} rx="16" fill={SKIN} stroke={LINE} strokeWidth="2" />
+        <g>{headAnim}<circle cx="100" cy="46" r="19" fill="#4a4a50" stroke={LINE} strokeWidth="2" /></g>
+        <polyline points="72,86 74,108 80,58" fill="none" stroke={LINE} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points="128,86 126,108 120,58" fill="none" stroke={LINE} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+        {fist([80, 58], lfAnim)}
+        {fist([120, 58], rfAnim)}
+        {pose === 'slip' && <path d="M98 14 L70 14" stroke={GOLD} strokeWidth="4" markerEnd={'url(#' + id + ')'} />}
+        {pose === 'roll' && <path d="M140 30 Q100 120 60 30" fill="none" stroke={GOLD} strokeWidth="3" strokeOpacity="0.6" markerEnd={'url(#' + id + ')'} />}
+        {pose === 'upper' && <path d="M80 100 Q74 60 92 30" fill="none" stroke={GOLD} strokeWidth="4" strokeOpacity="0.5" markerEnd={'url(#' + id + ')'} />}
+        {pose === 'body' && <path d="M66 112 L32 112" stroke={GOLD} strokeWidth="4" strokeOpacity="0.6" markerEnd={'url(#' + id + ')'} />}
+        {pose === 'parry' && <path d="M150 40 L112 50" stroke={GOLD} strokeWidth="4" strokeOpacity="0.6" markerEnd={'url(#' + id + ')'} />}
       </g>
     </svg>
   );
@@ -1390,14 +1428,21 @@ const COMBO_LIB = [
   { t: 'Abrollen, Haken, Gerade!', r: ['roll', 'lhook', 'cross'] }, { t: 'Eins, zwei, abrollen!', r: ['roll', 'jab', 'cross'] }, { t: 'Abrollen, eins, zwei!', r: ['roll', 'jab', 'cross'] },
 ];
 const BEGINNER_PACING = ['Hände hoch!', 'Ausatmen beim Schlag!', 'Kinn runter!', 'Locker bleiben!', 'Bleib auf den Ballen!'];
-function callsFor(known, knuckle, unlockedCalls) {
+const COACH = { intensity: 'mittel', extra: [] };
+const comboLen = t => (t.match(/(jab|gerade|haken|eins|zwei|drei|vier|fünf|sechs|pendeln|abrollen|block|parieren|finte|zurücklehnen|pivot|winkel)/gi) || []).length;
+const estPunches = t => typeof t === 'string' ? (t.match(/(jab|gerade|haken|eins|zwei|drei|vier|fünf|sechs)/gi) || []).length : (t && t.punches) || 0;
+const callGap = () => COACH.intensity === 'leicht' ? rand(9000, 13000) : COACH.intensity === 'hart' ? rand(4000, 6500) : rand(6500, 9500);
+function callsFor(known, knuckle) {
   const lib = COMBO_LIB.filter(c => c.r.every(x => known.includes(x)));
   const strikes = lib.filter(c => !c.r.every(x => x === 'step' || x === 'guard'));
-  const base = strikes.length >= 3 ? strikes : lib;
+  let base = strikes.length >= 3 ? strikes : lib;
+  const I = COACH.intensity;
+  if (I === 'leicht') { const s = base.filter(c => comboLen(c.t) <= 2); if (s.length >= 3) base = s; }
+  if (I === 'hart') { const s = base.filter(c => comboLen(c.t) >= 3); if (s.length >= 4) base = s; }
   return () => {
     if (knuckle && Math.random() < 0.28) return pick(KNUCKLE_TIPS);
-    if (known.includes('guard') && Math.random() < 0.15) return pick(BEGINNER_PACING);
-    if (unlockedCalls.length && Math.random() < 0.15) return pick(unlockedCalls);
+    if (known.includes('guard') && Math.random() < (I === 'hart' ? 0.08 : 0.15)) return pick(BEGINNER_PACING);
+    if (COACH.extra.length && known.includes('jab') && Math.random() < 0.2) return pick(COACH.extra);
     return pick(base.length ? base : [{ t: 'Hände hoch!' }]).t;
   };
 }
@@ -1531,20 +1576,20 @@ function LearnStep({ step, next, say, lefty }) {
   );
 }
 
-function TimedStep({ step, next, say, known, lefty, unlockedCalls }) {
+function TimedStep({ step, next, say, known, lefty, onStat }) {
   const tk = useTicker();
   const [stage, setStage] = useState('ready');
   const nextCall = useRef(0);
   const [call, setCall] = useState('');
-  const gen = useMemo(() => callsFor(known, false, unlockedCalls), [known]);
+  const gen = useMemo(() => callsFor(known, false), [known]);
   useEffect(() => {
     say(step.title + '. ' + step.cue);
-    tk.start(5, () => { setStage('run'); bell(1); nextCall.current = Date.now() + 4000; tk.start(step.sec, () => { bell(1); next(); }, onTick); }, l => { if (l <= 3 && l > 0) beep(1, 880); });
+    tk.start(5, () => { setStage('run'); bell(1); nextCall.current = Date.now() + 4000; tk.start(step.sec, () => { bell(1); if (step.calls && onStat) onStat({ punches: Math.round(step.sec / 60 * 12) }); next(); }, onTick); }, l => { if (l <= 3 && l > 0) beep(1, 880); });
     return () => tk.stop();
   }, []);
   const onTick = left => {
     if (left === 10 && step.sec >= 30) beep(2, 1200);
-    if (step.calls && Date.now() >= nextCall.current && left > 4) { const c = gen(); setCall(c); say(c); nextCall.current = Date.now() + rand(6000, 9000); }
+    if (step.calls && Date.now() >= nextCall.current && left > 4) { const c = gen(); setCall(c); say(c); if (onStat) onStat({ punches: estPunches(c) }); nextCall.current = Date.now() + callGap(); }
   };
   const t = tk.t;
   return (
@@ -1589,32 +1634,35 @@ function RestScreen({ sec, upcoming, onDone, lefty }) {
   );
 }
 
-function RoundsStep({ step, next, say, known, adjust, unlockedCalls, onKnuckle }) {
+function RoundsStep({ step, next, say, known, adjust, onKnuckle, onStat }) {
   const rounds = Math.max(2, step.rounds + adjust);
   const tk = useTicker();
   const [phase, setPhase] = useState('ready');
   const [round, setRound] = useState(1);
   const [call, setCall] = useState('');
   const nextCall = useRef(0), flags = useRef({});
-  const gen = useMemo(() => callsFor(known, !!step.knuckle, unlockedCalls), [known]);
+  const gen = useMemo(() => step.mode === 'opponent' ? oppGen(known) : step.mode === 'pads2' ? padsGen(known) : callsFor(known, !!step.knuckle), [known]);
+  const gap = () => step.mode === 'opponent' ? oppGap() : callGap();
   const roundRef = useRef(1);
   const startWork = n => {
     roundRef.current = n; setRound(n); setPhase('work'); setCall(''); flags.current = {}; bell(1);
-    say(n === rounds ? 'Letzte Runde! Gib alles!' : 'Runde ' + n + '. Los!');
+    say(step.work <= 30 ? (n === rounds ? 'Letzte! Vollgas!' : 'Los!') : n === rounds ? 'Letzte Runde! Gib alles!' : 'Runde ' + n + '. Los!');
     nextCall.current = Date.now() + 3500;
     tk.start(step.work, () => {
+      if (onStat) onStat({ rounds: 1, punches: Math.round(step.work / 60 * (step.noBag ? 12 : 20)) });
       if (n >= rounds) { bell(3); say('Geschafft! Super gemacht!'); if (step.knuckle) onKnuckle(); next(); }
-      else { bell(1); setPhase('rest'); setCall(''); say('Pause. Tief atmen. Gleich kommt Runde ' + (n + 1) + '.'); tk.start(step.rest, () => startWork(n + 1), restTick); }
+      else if (step.rest > 0) { bell(1); setPhase('rest'); setCall(''); say(step.rest >= 20 ? 'Pause. Tief atmen. Gleich kommt Runde ' + (n + 1) + '.' : 'Pause!'); tk.start(step.rest, () => startWork(n + 1), restTick); }
+      else startWork(n + 1);
     }, workTick);
   };
   const workTick = left => {
     if (!flags.current.k30 && left <= 30 && left > 0 && step.work >= 60) { flags.current.k30 = true; knock(3); setCall('Noch 30 Sekunden!'); say('Noch 30 Sekunden! Gas geben!'); nextCall.current = Date.now() + 6000; return; }
     if (!flags.current.k10 && left <= 10 && left > 0) { flags.current.k10 = true; knock(2); }
-    if (Date.now() >= nextCall.current && left > 4) { const c = gen(); setCall(c); say(c); nextCall.current = Date.now() + rand(7000, 10000); }
+    if (Date.now() >= nextCall.current && left > 4) { const c = gen(); setCall(c); say(typeof c === 'string' ? c : c.say); if (onStat) onStat({ punches: estPunches(c) }); nextCall.current = Date.now() + gap(); }
   };
-  const restTick = left => { if (left === 10) { beep(2, 990); say('Zehn Sekunden. Hände hoch, bereit machen!'); } };
+  const restTick = left => { if (left === 10 && step.rest > 15) { beep(2, 990); say('Zehn Sekunden. Hände hoch, bereit machen!'); } };
   useEffect(() => {
-    say('Jetzt an den Sandsack. ' + step.note + ' ' + rounds + ' Runden. Stell dich bereit.');
+    say((step.noBag ? '' : 'Jetzt an den Sandsack. ') + step.note + ' ' + rounds + ' Runden. Stell dich bereit.');
     tk.start(12, () => startWork(1), l => { if (l <= 3 && l > 0) beep(1, 880); });
     return () => tk.stop();
   }, []);
@@ -1622,7 +1670,7 @@ function RoundsStep({ step, next, say, known, adjust, unlockedCalls, onKnuckle }
   const color = phase === 'work' ? RED : phase === 'rest' ? GOLD : '#777';
   return (
     <div className="flex flex-1 flex-col">
-      <div className="text-center text-xs uppercase tracking-[0.25em] text-gold">{phase === 'ready' ? 'Geh an den Sack' : phase === 'rest' ? 'Pause' : 'Runde ' + round + ' von ' + rounds}</div>
+      <div className="text-center text-xs uppercase tracking-[0.25em] text-gold">{phase === 'ready' ? (step.noBag ? 'Mach dich bereit' : 'Geh an den Sack') : phase === 'rest' ? 'Pause' : 'Runde ' + round + ' von ' + rounds}</div>
       <h2 className="mt-1 text-center font-display text-3xl uppercase leading-tight text-stone-50">{phase === 'rest' ? 'Durchatmen' : step.title}</h2>
       <div className="mt-2 flex justify-center gap-1.5">{Array.from({ length: rounds }).map((_, i) => <span key={i} className={'h-2 w-6 rounded-full ' + (i + 1 < round || (i + 1 === round && phase === 'rest') ? 'bg-gold' : i + 1 === round && phase === 'work' ? 'bg-blood' : 'bg-white/15')}></span>)}</div>
       <div className="mt-4">
@@ -1632,7 +1680,8 @@ function RoundsStep({ step, next, say, known, adjust, unlockedCalls, onKnuckle }
         </Ring>
       </div>
       <div className="mt-4 min-h-[4rem] text-center">
-        {phase === 'work' && call && <div className="font-display text-3xl uppercase leading-tight text-gold">{call}</div>}
+        {phase === 'work' && call && <div className="font-display text-3xl uppercase leading-tight text-gold">{typeof call === 'string' ? call : call.show}</div>}
+        {phase === 'work' && call && typeof call !== 'string' && call.sub && <div className="mx-auto mt-2 max-w-xs rounded-xl bg-white/5 px-3 py-2 text-sm text-stone-200">{call.sub}</div>}
         {phase !== 'work' && <p className="text-base text-stone-300">{phase === 'ready' ? step.note : 'Trink einen Schluck. Schultern locker.'}</p>}
       </div>
       {step.knuckle && <div className="mt-2 rounded-xl bg-gold/10 p-2 text-center text-xs text-gold">Knöchelhandschuhe: nur 70–80 % Kraft</div>}
@@ -1707,18 +1756,21 @@ function CheckStep({ next, say, onWrap }) {
   );
 }
 
-function DoneScreen({ session, minutes, onFeedback, isFinal, xp }) {
+function DoneScreen({ session, minutes, onFeedback, isFinal, xp, punches, record }) {
   useEffect(() => { bell(2); }, []);
   return (
     <div className="flex flex-1 flex-col items-center text-center">
       <div className="mt-6 text-7xl">{isFinal ? '🏆' : '🥊'}</div>
-      <h2 className="mt-3 font-display text-4xl uppercase leading-tight text-gold">{isFinal ? 'Grundausbildung geschafft!' : 'Geschafft!'}</h2>
+      <h2 className="mt-3 font-display text-4xl uppercase leading-tight text-gold">{isFinal ? session.lesson.finalText || 'Geschafft!' : 'Geschafft!'}</h2>
       <p className="mt-2 text-lg text-stone-200">{session.title} ist erledigt.</p>
-      <div className="mt-6 grid w-full grid-cols-2 gap-2">
+      {record && <div className="mt-3 rounded-full bg-gold px-4 py-1.5 font-display text-sm uppercase text-ink">🏅 Neuer Rekord: meiste Schläge!</div>}
+      <div className="mt-6 grid w-full grid-cols-3 gap-2">
         <div className="rounded-2xl bg-anth p-4"><div className="font-display text-3xl text-stone-50">{minutes}</div><div className="text-xs uppercase tracking-wider text-stone-500">Minuten</div></div>
         <div className="rounded-2xl bg-anth p-4"><div className="font-display text-3xl text-gold">+{xp}</div><div className="text-xs uppercase tracking-wider text-stone-500">XP</div></div>
+        <div className="rounded-2xl bg-anth p-4"><div className="font-display text-3xl text-stone-50">{punches || 0}</div><div className="text-xs uppercase tracking-wider text-stone-500">Schläge*</div></div>
       </div>
       <div className="mt-8 w-full">
+        <p className="mb-4 text-[11px] text-stone-500">* geschätzt aus Ansagen und Rundenzeit</p>
         <div className="font-display text-xl uppercase text-stone-100">Wie war’s für dich?</div>
         <p className="text-sm text-stone-400">Danach passe ich die nächsten Runden an.</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -1742,16 +1794,17 @@ function Player({ session, app, onClose }) {
   const [done, setDone] = useState(false);
   const [askQuit, setAskQuit] = useState(false);
   const startedAt = useRef(Date.now());
-  const extra = useRef({ wrap: false, pull: 0, knuckle: false });
+  const extra = useRef({ wrap: false, pull: 0, knuckle: false, rounds: 0, punches: 0, min: 0 });
+  const bestBefore = useRef(app.d.best.punches);
+  const onStat = s => { extra.current.rounds += s.rounds || 0; extra.current.punches += s.punches || 0; };
   const st = state.settings;
   const say = txt => { if (st.voiceOn) speak(txt, st.rate); };
-  const unlockedCalls = state.path.done.length >= 12 ? REWARDS.filter(r => r.type === 'combo' && state.unlocked.includes(r.id)).map(r => r.call) : [];
   useEffect(() => {
     ac(); let lock = null;
     try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(l => { lock = l; }).catch(() => { }); } catch (e) { }
     return () => { try { lock && lock.release(); window.speechSynthesis.cancel(); } catch (e) { } };
   }, []);
-  const finish = () => { setDone(true); completeSession(session, extra.current); try { window.speechSynthesis.cancel(); } catch (e) { } say(session.lesson && session.lesson.final ? 'Unglaublich! Du hast die Grundausbildung geschafft!' : 'Training geschafft! Stark gemacht!'); };
+  const finish = () => { setDone(true); extra.current.min = Math.max(1, Math.round((Date.now() - startedAt.current) / 60000)); completeSession(session, extra.current); try { window.speechSynthesis.cancel(); } catch (e) { } say(session.lesson && session.lesson.final ? 'Unglaublich! Du hast die Grundausbildung geschafft!' : 'Training geschafft! Stark gemacht!'); };
   const next = () => {
     const cur = steps[i];
     const go = () => { setRest(null); if (i + 1 >= steps.length) finish(); else setI(i + 1); };
@@ -1771,11 +1824,11 @@ function Player({ session, app, onClose }) {
           <div className="w-12 text-right text-xs tabular-nums text-stone-500">{Math.min(i + 1, steps.length)}/{steps.length}</div>
         </div>
         <div className="mt-4 flex flex-1 flex-col">
-          {done ? <DoneScreen xp={65 + (extra.current.wrap ? 10 : 0)} session={session} isFinal={session.lesson && session.lesson.final} minutes={Math.max(1, Math.round((Date.now() - startedAt.current) / 60000))} onFeedback={v => { update(s => ({ ...s, path: { ...s.path, adjust: clamp((s.path.adjust || 0) + v, -1, 2) } })); onClose(); }} />
+          {done ? <DoneScreen xp={65 + (extra.current.wrap ? 10 : 0)} punches={extra.current.punches} record={extra.current.punches > bestBefore.current && bestBefore.current > 0} session={session} isFinal={session.lesson && session.lesson.final} minutes={Math.max(1, Math.round((Date.now() - startedAt.current) / 60000))} onFeedback={v => { update(s => ({ ...s, path: { ...s.path, adjust: clamp((s.path.adjust || 0) + v, -1, 2) } })); onClose(); }} />
             : rest ? <RestScreen key={'r' + i} sec={rest.sec} upcoming={steps[i + 1]} onDone={rest.go} />
               : step.type === 'learn' ? <LearnStep key={i} step={step} next={next} say={say} lefty={lefty} />
-                : step.type === 'timed' ? <TimedStep key={i} step={step} next={next} say={say} known={known} lefty={lefty} unlockedCalls={unlockedCalls} />
-                  : step.type === 'rounds' ? <RoundsStep key={i} step={step} next={next} say={say} known={known} adjust={state.path.adjust || 0} unlockedCalls={unlockedCalls} onKnuckle={() => { extra.current.knuckle = true; }} />
+                : step.type === 'timed' ? <TimedStep key={i} step={step} next={next} say={say} known={known} lefty={lefty} onStat={onStat} />
+                  : step.type === 'rounds' ? <RoundsStep key={i} step={step} next={next} say={say} known={known} adjust={session.kind === 'lesson' ? (state.path.adjust || 0) : 0} onStat={onStat} onKnuckle={() => { extra.current.knuckle = true; }} />
                     : step.type === 'reps' ? <RepsStep key={i} step={step} next={next} say={say} onPull={n => { extra.current.pull += n; }} />
                       : step.type === 'check' ? <CheckStep key={i} next={next} say={say} onWrap={() => { extra.current.wrap = true; }} />
                         : null}
@@ -1803,7 +1856,7 @@ function LessonSheet({ lesson, app, onStart, onClose }) {
   const { state } = app;
   const steps = resolveSteps(lesson.steps, state.equip);
   const min = estMinutes(steps, state.path.adjust || 0);
-  const needsBag = steps.some(s => s.type === 'rounds');
+  const needsBag = steps.some(s => s.type === 'rounds' && !s.noBag);
   const groups = [];
   steps.forEach(s => {
     const label = WARM.includes(s) ? 'Aufwärmen' : COOL.includes(s) ? 'Abkühlen & dehnen' : stepLabel(s);
@@ -1814,7 +1867,7 @@ function LessonSheet({ lesson, app, onStart, onClose }) {
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 sm:items-center" onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/10 bg-anth p-5 sm:rounded-3xl" onClick={e => e.stopPropagation()}>
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-white/20 sm:hidden"></div>
-        {lesson.id !== 'regen' && <div className="text-xs uppercase tracking-[0.2em] text-blood">Woche {lesson.week} · Lektion {lessonIndex(lesson.id) + 1}</div>}
+        {lesson.week ? <div className="text-xs uppercase tracking-[0.2em] text-blood">Woche {lesson.week} · Lektion {lessonIndex(lesson.id) + 1}</div> : lesson.kind === 'workout' ? <div className="text-xs uppercase tracking-[0.2em] text-blood">{lesson.icon} Workout</div> : null}
         <h3 className="font-display text-3xl uppercase leading-tight text-stone-50">{lesson.title}</h3>
         <p className="mt-1 text-stone-300">{lesson.goal}</p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -1992,8 +2045,8 @@ function Home({ app }) {
       ) : (
         <div className="rounded-3xl border border-gold/50 bg-gradient-to-br from-gold/25 to-anth p-5">
           <div className="text-4xl">🏆</div>
-          <div className="mt-1 font-display text-2xl uppercase text-gold">Grundausbildung geschafft!</div>
-          <p className="mt-1 text-stone-300">Jetzt bist du bereit für das Fight Camp. Starte mit der Einsteiger-Stufe.</p>
+          <div className="mt-1 font-display text-2xl uppercase text-gold">Alle 24 Lektionen geschafft!</div>
+          <p className="mt-1 text-stone-300">Du bist bereit für das Fight Camp. Trainiere nach Plan oder wähle ein Workout aus der Bibliothek.</p>
           <div className="mt-4 space-y-2">
             <BigBtn onClick={() => { const cd = campDayOf(state, tKey); loadPreset(DAYS[cd - 1].preset[state.settings.level === 'profi' ? 'p' : lvl], 'Tag ' + cd + ': ' + DAYS[cd - 1].name); }}>▶ Fight-Camp-Training heute</BigBtn>
             <BigBtn kind="ghost" onClick={() => go('more', 'camp')}>Wochenplan ansehen</BigBtn>
@@ -2030,6 +2083,8 @@ function Home({ app }) {
         {lastReward && <RewardCard r={lastReward} />}
       </div>
 
+      <HomeExtras app={app} />
+
       {/* Lernpfad */}
       <PathView app={app} />
     </div>
@@ -2044,7 +2099,7 @@ function PathView({ app }) {
     <div>
       <div className="mb-1 font-display text-lg uppercase tracking-wider text-stone-200">Dein Weg zum Boxer</div>
       <div className="mb-3 text-xs text-stone-500">{done.length} von {LESSONS.length} Lektionen geschafft</div>
-      {[1, 2, 3, 4].map(w => (
+      {Object.keys(WEEKS).map(Number).map(w => (
         <div key={w} className="mb-4">
           <div className="mb-2 flex items-center gap-2"><span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] uppercase tracking-wider text-stone-300">Woche {w}</span><span className="text-sm text-stone-400">{WEEKS[w]}</span></div>
           <div className="space-y-2">
@@ -2082,6 +2137,7 @@ function LearnTab({ app }) {
         <div className="font-display text-2xl uppercase text-stone-50">Techniken</div>
         <p className="text-sm text-stone-400">Tippe eine Technik an, um sie nochmal anzuschauen.</p>
       </div>
+      <VideoCheck app={app} known={known} />
       <div className="grid grid-cols-2 gap-2.5">
         {TECH_ORDER.map(id => {
           const t = TECH[id], ok = known.includes(id);
@@ -2120,10 +2176,12 @@ function MoreTab({ app, sub, setSub, focusWarmup }) {
   const items = [
     ['timer', '⏱', 'Freier Box-Timer', 'Runden-Timer mit Voice Coach'],
     ['camp', '📅', 'Fight-Camp-Plan', 'Für Fortgeschrittene – nach den 12 Lektionen'],
-    ['food', '🥦', 'Essen, Trinken & Schlaf', 'Checkliste, Wasser, Rechner'],
+    ['food', '🥦', 'Essen, Trinken & Schlaf', 'Essensplan, Wasser, Schlaf'],
+    ['shop', '🛒', 'Einkaufsliste', 'Für deinen Essensplan der Woche'],
+    ['combos', '🧩', 'Kombi-Baukasten', 'Eigene Kombinationen für den Coach'],
     ['settings', '⚙️', 'Einstellungen', 'Name, Hand, Stimme, Ausrüstung'],
   ];
-  const titles = { timer: 'Freier Box-Timer', camp: 'Fight-Camp-Plan', food: 'Essen, Trinken & Schlaf', settings: 'Einstellungen' };
+  const titles = { timer: 'Freier Box-Timer', camp: 'Fight-Camp-Plan', food: 'Essen, Trinken & Schlaf', settings: 'Einstellungen', shop: 'Einkaufsliste', combos: 'Kombi-Baukasten' };
   return (
     <div>
       {sub ? (
@@ -2145,6 +2203,8 @@ function MoreTab({ app, sub, setSub, focusWarmup }) {
       <div className={sub === 'camp' ? '' : 'hidden'}><PlanPanel app={app} focusWarmup={focusWarmup} /></div>
       <div className={sub === 'food' ? '' : 'hidden'}><FoodPanel app={app} /></div>
       <div className={sub === 'settings' ? '' : 'hidden'}><SettingsPanel app={app} /></div>
+      {sub === 'shop' && <ShoppingList app={app} />}
+      {sub === 'combos' && <ComboBuilder app={app} />}
     </div>
   );
 }
@@ -2207,6 +2267,10 @@ function SettingsPanel({ app }) {
         <div className="mt-3 grid grid-cols-2 gap-2">
           {[['r', 'Rechtshänder'], ['l', 'Linkshänder']].map(([v, l]) => <button key={v} onClick={() => setPr({ hand: v })} className={'rounded-xl border py-3 text-sm ' + (pr.hand === v ? 'border-gold bg-gold/15 text-gold' : 'border-white/10 text-stone-400')}>{l}</button>)}
         </div>
+      </Card>
+      <Card>
+        <H2 sub="Wie schnell und wie lang die Ansagen sind">Coach-Intensität</H2>
+        <IntensityPicker app={app} />
       </Card>
       <Card>
         <H2>Stimme</H2>
@@ -2297,7 +2361,7 @@ function BackupCard({ app }) {
 }
 
 /* ---------- App ---------- */
-const NAV = [['home', '🏠', 'Heute'], ['learn', '📖', 'Lernen'], ['progress', '🏆', 'Erfolge'], ['more', '☰', 'Mehr']];
+const NAV = [['home', '🏠', 'Heute'], ['workouts', '🗂', 'Workouts'], ['learn', '📖', 'Lernen'], ['progress', '🏆', 'Erfolge'], ['more', '☰', 'Mehr']];
 
 function App() {
   const [state, update, sync] = usePersistent();
@@ -2314,6 +2378,8 @@ function App() {
   });
   useEffect(() => { const i = setInterval(() => setTKey(todayKey()), 60000); return () => clearInterval(i); }, []);
 
+  COACH.intensity = state.settings.intensity || 'mittel';
+  COACH.extra = [...(state.path.done.length >= 12 ? REWARDS.filter(r => r.type === 'combo' && state.unlocked.includes(r.id)).map(r => r.call) : []), ...state.combos.filter(c => c.on).map(c => c.text)];
   VOICE_PREF.name = state.settings.voiceName || null; VOICE_PREF.pitch = state.settings.pitch || 0.95;
   const d = useMemo(() => derive(state), [state]);
   const today = getDay(state, tKey);
@@ -2337,6 +2403,11 @@ function App() {
   const openLesson = l => setSheet(l);
   const startLesson = (l, steps) => {
     setSheet(null);
+    if (l.kind === 'workout') {
+      const maxIdx = state.path.done.length ? Math.max(...state.path.done.map(lessonIndex)) : 0;
+      setSession({ key: Date.now(), id: l.id, kind: 'workout', cat: l.cat, title: l.title, steps, known: l.known || knownUpTo(maxIdx), opp: steps.some(s => s.mode === 'opponent') });
+      return;
+    }
     const idx = lessonIndex(l.id);
     setSession({ key: Date.now(), id: l.id, kind: 'lesson', title: l.title, lesson: l, steps, known: knownUpTo(idx) });
   };
@@ -2350,7 +2421,8 @@ function App() {
       const nd = { ...day, workout: true, warmup: true, wrap: day.wrap || !!extra.wrap, sessions: (day.sessions || 0) + 1, speed: (day.speed || 0) + (extra.knuckle ? 1 : 0), pullups: (day.pullups || 0) + (extra.pull || 0) };
       const path = { ...st.path };
       if (s.kind === 'lesson') { path.done = path.done.includes(s.id) ? path.done : [...path.done, s.id]; path.last = tKey; }
-      return { ...st, path, history: { ...st.history, [tKey]: nd } };
+      const entry = { d: tKey, t: Date.now(), title: s.title, kind: s.kind, id: s.id, cat: s.cat, min: extra.min || 0, rounds: extra.rounds || 0, punches: extra.punches || 0, opp: !!(s.opp || (s.steps || []).some(x => x.mode === 'opponent')) };
+      return { ...st, path, log: [...st.log, entry].slice(-500), history: { ...st.history, [tKey]: nd } };
     });
   };
 
@@ -2360,9 +2432,10 @@ function App() {
       update(s => ({ ...s, trophies: [...s.trophies, ...earned.map(t => t.id).filter(id => !s.trophies.includes(id))] }));
       earned.forEach(t => toast('🏆 Neue Trophäe: ' + t.name));
     }
-  }, [d.sessions, d.streak, d.pullups, d.champ, d.speed, d.warmups, d.hydro, d.base, d.basics]);
+  }, [d.sessions, d.streak, d.pullups, d.champ, d.speed, d.warmups, d.hydro, d.base, d.basics, d.totals.punches, d.videos, d.challengesDone]);
 
-  const app = { state, update, d, today, tKey, updateToday, go, loadPreset, preset, setPreset, toast, claimReward, sync, openLesson, startRegen, completeSession };
+  const addLog = e => update(st => ({ ...st, log: [...st.log, { d: tKey, t: Date.now(), ...e }].slice(-500) }));
+  const app = { addLog, state, update, d, today, tKey, updateToday, go, loadPreset, preset, setPreset, toast, claimReward, sync, openLesson, startRegen, completeSession };
 
   return (
     <div className="mx-auto min-h-screen max-w-lg px-4 pb-28 pt-4">
@@ -2376,11 +2449,12 @@ function App() {
 
       <div className={tab === 'home' ? '' : 'hidden'}><Home app={app} /></div>
       <div className={tab === 'learn' ? '' : 'hidden'}><LearnTab app={app} /></div>
-      <div className={tab === 'progress' ? '' : 'hidden'}><TrophyPanel app={app} /></div>
+      <div className={tab === 'progress' ? '' : 'hidden'}><ProgressTab app={app} /></div>
+      <div className={tab === 'workouts' ? '' : 'hidden'}><WorkoutsTab app={app} /></div>
       <div className={tab === 'more' ? '' : 'hidden'}><MoreTab app={app} sub={sub} setSub={setSub} focusWarmup={focusWarmup} /></div>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-ink/95 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="mx-auto grid max-w-lg grid-cols-4">
+        <div className="mx-auto grid max-w-lg grid-cols-5">
           {NAV.map(([id, e, l]) => (
             <button key={id} onClick={() => { setTab(id); if (id === 'more') setSub(null); window.scrollTo({ top: 0 }); }} className={'flex flex-col items-center gap-0.5 py-2.5 transition ' + (tab === id ? 'text-gold' : 'text-stone-500')}>
               <span className={'text-2xl transition ' + (tab === id ? 'scale-110' : 'opacity-70 grayscale')}>{e}</span>
@@ -2397,6 +2471,611 @@ function App() {
       {sheet && <LessonSheet lesson={sheet} app={app} onClose={() => setSheet(null)} onStart={steps => startLesson(sheet, steps)} />}
       {session && <Player key={session.key} session={session} app={app} onClose={() => setSession(null)} />}
       {!state.onboarded && <Onboarding app={app} />}
+    </div>
+  );
+}
+
+
+
+/* =====================================================================
+   ERWEITERUNG: Fortgeschrittenen-Weg, Gegner-Modus, Pratzen zu zweit,
+   Workout-Bibliothek, Statistik, Challenges, Gewicht, Video-Check,
+   Einkaufsliste, Kombi-Baukasten, Intensität
+   ===================================================================== */
+
+Object.assign(TECH, {
+  parry: { name: 'Parieren', img: 'front:parry', lesson: 13, points: () => ['Mit der offenen Hand den Schlag kurz zur Seite schieben.', 'Nur eine kleine Bewegung – die Hand kommt sofort zurück.', 'Danach direkt mit Jab oder Gerade antworten.'], mistake: 'Nicht nach dem Schlag greifen oder weit ausholen.', caption: 'Hand lenkt den Jab zur Seite ab' },
+  feint: { name: 'Finten (Täuschen)', img: 'top:feint', lesson: 14, points: () => ['Einen Jab nur halb andeuten – mit Schulter und Blick.', 'Der Gegner reagiert, und du triffst in die Lücke.', 'Finte und echter Schlag müssen gleich aussehen.'], mistake: 'Nicht zu langsam täuschen – sonst durchschaut es jeder.', caption: 'Kurz andeuten, dann richtig schlagen' },
+  pullcounter: { name: 'Pull-Counter', img: 'top:pull', lesson: 16, points: () => ['Gewicht aufs hintere Bein verlagern und den Oberkörper leicht zurücknehmen.', 'Der Jab des Gegners geht ins Leere.', 'Sofort nach vorne kommen und mit der Geraden kontern.'], mistake: 'Nicht zu weit zurücklehnen – die Füsse bleiben stehen.', caption: 'Zurück, dann mit der Geraden nach vorne' },
+  checkhook: { name: 'Check-Haken', img: 'top:checkhook', lesson: 17, points: () => ['Der Gegner stürmt nach vorne.', 'Vorderer Haken – und gleichzeitig auf dem vorderen Fuss wegdrehen.', 'Er läuft ins Leere, du stehst seitlich von ihm.'], mistake: 'Nicht stehen bleiben – Drehung und Haken passieren zusammen.', caption: 'Haken und Drehung in einem' },
+  angle: { name: 'Winkel nehmen', img: 'feet:pivot', lesson: 20, points: () => ['Nach einer Kombination nicht gerade zurückgehen.', 'Mit einem Seitschritt oder Pivot zur Seite gehen.', 'Aus dem neuen Winkel gleich wieder angreifen.'], mistake: 'Nie in einer geraden Linie zurück – dort trifft der Gegner.', caption: 'Seitlich raus statt gerade zurück' },
+});
+TECH_ORDER.push('parry', 'feint', 'pullcounter', 'checkhook', 'angle');
+
+COMBO_LIB.push(
+  { t: 'Parieren, Jab, Gerade!', r: ['parry', 'jab', 'cross'] }, { t: 'Parieren, Gerade!', r: ['parry', 'cross'] },
+  { t: 'Finte, Gerade!', r: ['feint', 'cross'] }, { t: 'Finte Jab, Körperhaken!', r: ['feint', 'body', 'lhook'] }, { t: 'Finte, eins, zwei!', r: ['feint', 'jab', 'cross'] },
+  { t: 'Zurücklehnen, Gerade!', r: ['pullcounter'] }, { t: 'Zurücklehnen, Gerade, Haken!', r: ['pullcounter', 'lhook'] },
+  { t: 'Check-Haken, raus!', r: ['checkhook'] }, { t: 'Eins, zwei, Check-Haken!', r: ['checkhook', 'jab', 'cross'] },
+  { t: 'Eins, zwei, Winkel, eins, zwei!', r: ['angle', 'jab', 'cross'] }, { t: 'Eins, zwei, drei, Winkel!', r: ['angle', 'lhook'] },
+  { t: 'Eins, zwei, drei, zwei, Körperhaken!', r: ['lhook', 'body'] }, { t: 'Jab, Gerade, Aufwärtshaken, Haken, Gerade!', r: ['upper', 'lhook'] },
+  { t: 'Körper, Körper, Kopf!', r: ['body', 'lhook', 'rhook'] }, { t: 'Doppelter Haken, Gerade!', r: ['lhook', 'cross'] },
+);
+
+LESSONS.push(
+  { id: 'L13', week: 5, title: 'Parieren', goal: 'Schläge mit der Hand ablenken.', learns: ['parry'], steps: [...WARM, learn('parry'), shadow(60, 'Parieren üben', 'Parieren und sofort zurückschlagen.'), WRAP, bag(4, 120, 60, 'Nach jeder Kombination: parieren und kontern.'), ...COOL] },
+  { id: 'L14', week: 5, title: 'Finten', goal: 'Täuschen wie ein Profi.', learns: ['feint'], steps: [...WARM, learn('feint'), shadow(60), shadow(60), WRAP, bag(4, 120, 60, 'Täusche an – dann triff!'), ...COOL] },
+  { id: 'L15', week: 5, title: 'Kondition', goal: 'Mehr Luft für lange Runden.', learns: [], steps: [...WARM, WRAP, bag(6, 60, 30, 'Hohes Tempo, viele Schläge!'), reps('Burpees', 3, '8', 'Runter, Brust zum Boden, hochspringen.'), reps('Unterarmstütz (Plank)', 2, '40 Sek.', 'Körper gerade wie ein Brett.', { hold: 40 }), ...COOL] },
+  { id: 'L16', week: 6, title: 'Pull-Counter', goal: 'Ausweichen nach hinten und kontern.', learns: ['pullcounter'], steps: [...WARM, learn('pullcounter'), shadow(60), WRAP, bag(4, 120, 60, 'Zurücklehnen und mit der Geraden kontern.'), ...COOL] },
+  { id: 'L17', week: 6, title: 'Check-Haken', goal: 'Den stürmenden Gegner auskontern.', learns: ['checkhook'], steps: [...WARM, learn('checkhook'), shadow(60), WRAP, bag(4, 120, 60, 'Haken und Drehung zusammen.'), ...COOL] },
+  { id: 'L18', week: 6, title: 'Gegner-Modus', goal: 'Reagiere auf die Angriffe des Gegners.', learns: [], steps: [...WARM, bag(4, 90, 60, 'Ich sage an, was der Gegner schlägt. Du verteidigst und konterst.', { mode: 'opponent', title: 'Gegner-Modus', noBag: true }), WRAP, bag(3, 120, 60, 'Jetzt am Sack: Kombinationen mit Verteidigung.'), ...COOL] },
+  { id: 'L19', week: 7, title: 'Lange Kombinationen', goal: '4 bis 5 Schläge am Stück.', learns: [], steps: [...WARM, shadow(90), WRAP, bag(5, 120, 60, 'Lange Kombinationen – Deckung trotzdem oben!'), ...COOL] },
+  { id: 'L20', week: 7, title: 'Winkel & Ringmitte', goal: 'Nach dem Angriff seitlich raus.', learns: ['angle'], steps: [...WARM, learn('angle'), shadow(60), WRAP, bag(5, 120, 60, 'Nach jeder Kombination: Winkel nehmen.'), ...COOL] },
+  { id: 'L21', week: 7, title: 'Kraft-Tag 2', goal: 'Mehr Power für deine Schläge.', learns: [], steps: [...WARM, reps('Klimmzüge', 4, '3–6', 'Saubere Wiederholungen, ganz runter und hoch.', { pull: 4, need: 'bar', alt: reps('Liegestütze eng', 4, '8–12', 'Hände eng, Ellbogen am Körper.') }), reps('Liegestütze', 3, '10–15', 'Rücken gerade, Brust bis kurz über den Boden.'), reps('Hocksprünge', 3, '10', 'Tief in die Hocke, explosiv hochspringen.'), reps('Unterarmstütz (Plank)', 3, '40 Sek.', 'Körper gerade wie ein Brett.', { hold: 40 }), WRAP, bag(4, 60, 45, 'Power-Kombinationen!'), ...COOL] },
+  { id: 'L22', week: 8, title: 'Speed-Ausdauer', goal: 'Schnell bleiben, auch wenn du müde bist.', learns: [], steps: [...WARM, WRAP, bag(8, 20, 10, '20 Sekunden Vollgas, 10 Sekunden Pause.', { title: 'Tabata' }), bag(4, 120, 60, 'Saubere Technik trotz Müdigkeit.'), ...COOL] },
+  { id: 'L23', week: 8, title: 'Sparring-Simulation', goal: 'Verteidigen und kontern am Sack.', learns: [], steps: [...WARM, WRAP, bag(6, 120, 60, 'Gegner-Modus am Sack: verteidigen, dann kontern!', { mode: 'opponent', title: 'Sparring-Simulation' }), ...COOL] },
+  { id: 'L24', week: 8, title: 'Der Titelkampf', goal: '6 Runden à 3 Minuten – dein Titelkampf.', learns: [], final: true, finalText: 'Titelkampf gewonnen!', steps: [...WARM, shadow(60, 'Schattenboxen', 'Mach dich bereit für den Titelkampf!'), WRAP, bag(6, 180, 60, 'Der Titelkampf! Zeig alles, was du gelernt hast.'), ...COOL] },
+);
+Object.assign(WEEKS, { 5: 'Feinere Technik', 6: 'Konter-Boxer', 7: 'Druck machen', 8: 'Wettkampf-bereit' });
+LESSONS.find(l => l.id === 'L12').finalText = 'Grundausbildung geschafft!';
+
+/* ---------- Gegner-Modus & Pratzen zu zweit ---------- */
+const OPP = [
+  { say: 'Achtung, Jab!', show: 'Jab kommt', hint: 'Pendeln → Gerade kontern', r: ['slip', 'cross'] },
+  { say: 'Achtung, Jab!', show: 'Jab kommt', hint: 'Blocken → eins, zwei', r: ['block', 'jab', 'cross'] },
+  { say: 'Achtung, Gerade!', show: 'Gerade kommt', hint: 'Pendeln → Haken kontern', r: ['slip', 'lhook'] },
+  { say: 'Achtung, Haken!', show: 'Haken kommt', hint: 'Abrollen → Haken, Gerade', r: ['roll', 'lhook', 'cross'] },
+  { say: 'Achtung, Haken!', show: 'Haken kommt', hint: 'Blocken → eins, zwei', r: ['block'] },
+  { say: 'Achtung, Körperhaken!', show: 'Körperhaken kommt', hint: 'Ellbogen runter → Aufwärtshaken', r: ['block', 'upper'] },
+  { say: 'Achtung, Jab!', show: 'Jab kommt', hint: 'Parieren → Jab, Gerade', r: ['parry'] },
+  { say: 'Achtung, Gerade!', show: 'Gerade kommt', hint: 'Zurücklehnen → Gerade', r: ['pullcounter'] },
+  { say: 'Er stürmt nach vorne!', show: 'Gegner stürmt', hint: 'Check-Haken und zur Seite', r: ['checkhook'] },
+  { say: 'Lücke! Angreifen!', show: 'Lücke!', hint: 'Eins, zwei, drei!', r: ['jab', 'cross', 'lhook'] },
+  { say: 'Er wird müde! Druck!', show: 'Druck machen', hint: 'Eins, zwei, Winkel!', r: ['angle'] },
+];
+function oppGen(known) {
+  const pool = OPP.filter(o => o.r.every(x => known.includes(x)));
+  const P = pool.length ? pool : [{ say: 'Achtung, Jab!', show: 'Jab kommt', hint: 'Hände hoch, blocken' }];
+  return () => { const o = pick(P); return { say: COACH.intensity === 'leicht' ? o.say + ' ' + o.hint.replace('→', ', dann') + '!' : o.say, show: o.show, sub: o.hint, punches: 2 }; };
+}
+const oppGap = () => COACH.intensity === 'leicht' ? rand(6000, 9000) : COACH.intensity === 'hart' ? rand(2500, 4000) : rand(3500, 6000);
+
+const PADS2 = [
+  { r: ['jab'], boxer: 'Jab', holder: 'Vordere Pratze nach vorne', say: 'Jab!' },
+  { r: ['jab'], boxer: 'Doppel-Jab', holder: 'Vordere Pratze nach vorne, zweimal', say: 'Doppel-Jab!' },
+  { r: ['jab', 'cross'], boxer: 'Eins, zwei', holder: 'Vordere, dann hintere Pratze nach vorne', say: 'Eins, zwei!' },
+  { r: ['jab', 'cross', 'lhook'], boxer: 'Eins, zwei, drei', holder: 'Beim Haken die Pratze seitlich drehen', say: 'Eins, zwei, drei!' },
+  { r: ['lhook', 'rhook'], boxer: 'Haken, Haken', holder: 'Beide Pratzen seitlich drehen', say: 'Haken, Haken!' },
+  { r: ['upper'], boxer: 'Aufwärtshaken', holder: 'Pratze nach unten drehen, auf Kinnhöhe', say: 'Aufwärtshaken!' },
+  { r: ['body', 'lhook'], boxer: 'Haken zum Körper', holder: 'Pratze an die Rippen halten', say: 'Haken zum Körper!' },
+  { r: ['slip', 'cross'], boxer: 'Pendeln, Gerade', holder: 'Langsamen Jab schlagen, dann Pratze hoch', say: 'Halter jabbt – pendeln, Gerade!' },
+  { r: ['roll', 'lhook', 'cross'], boxer: 'Abrollen, Haken, Gerade', holder: 'Langsamen Haken über den Kopf, dann Pratzen hoch', say: 'Halter schlägt Haken – abrollen, Haken, Gerade!' },
+  { r: ['block', 'jab', 'cross'], boxer: 'Blocken, eins, zwei', holder: 'Leicht auf die Deckung tippen, dann Pratzen vorne', say: 'Blocken, eins, zwei!' },
+];
+function padsGen(known) {
+  const P = PADS2.filter(o => o.r.every(x => known.includes(x)));
+  const L = P.length ? P : PADS2.slice(0, 1);
+  return () => { const o = pick(L); return { say: o.say, show: o.boxer, sub: 'Halter: ' + o.holder, punches: estPunches(o.boxer) || 1 }; };
+}
+
+/* ---------- Workout-Bibliothek ---------- */
+const NOBAG = { noBag: true };
+const LIB = [
+  { id: 'w_quick', cat: 'kondition', icon: '⚡', title: '15-Minuten-Express', goal: 'Kurz und knackig, wenn wenig Zeit ist.', steps: [WARM[0], WARM[2], WRAP, bag(4, 120, 45, 'Kurze Pausen – bleib dran!'), COOL[0]] },
+  { id: 'w_shadow', cat: 'technik', icon: '🥊', title: 'Schattenboxen', goal: '10 Minuten Technik ohne Sack.', steps: [WARM[0], WARM[1], shadow(120), shadow(120), shadow(120), COOL[0]] },
+  { id: 'w_jab', cat: 'technik', icon: '1️⃣', title: 'Jab-Meister', goal: 'Nur der Jab: schnell, gerade, zurück.', known: ['stance', 'guard', 'step', 'jab'], steps: [...WARM, WRAP, bag(4, 120, 60, 'Jab hoch, Jab tief, Doppel-Jab.'), ...COOL] },
+  { id: 'w_classic', cat: 'kondition', icon: '🔔', title: 'Klassische Runden', goal: '6 Runden à 2 Minuten am Sack.', steps: [...WARM, WRAP, bag(6, 120, 60, 'Klassische Boxrunden.'), ...COOL] },
+  { id: 'w_tabata', cat: 'kondition', icon: '🔥', title: 'Tabata-Burnout', goal: '2 Tabata-Blöcke – maximale Kondition.', steps: [...WARM, WRAP, bag(8, 20, 10, '20 Sekunden Vollgas! Schwere Handschuhe.', { title: 'Tabata 1' }), { type: 'timed', title: 'Durchatmen', sec: 60, icon: '🌬️', cue: 'Locker gehen, tief atmen.' }, bag(8, 20, 10, 'Noch einmal alles!', { title: 'Tabata 2' }), ...COOL] },
+  { id: 'w_power', cat: 'power', icon: '💥', title: 'Power-Runden', goal: 'Kräftige Kombinationen mit voller Hüfte.', minL: 5, steps: [...WARM, WRAP, bag(5, 90, 60, 'Kräftig schlagen – Hüfte drehen!'), ...COOL] },
+  { id: 'w_opp', cat: 'defensive', icon: '🛡️', title: 'Gegner-Modus', goal: 'Reagiere auf Angriffe – ohne Sack.', minL: 6, steps: [...WARM, bag(5, 120, 60, 'Ich sage die Angriffe an. Verteidige und konter!', { mode: 'opponent', title: 'Gegner-Modus', ...NOBAG }), ...COOL] },
+  { id: 'w_spar', cat: 'defensive', icon: '🥋', title: 'Sparring am Sack', goal: 'Gegner-Modus mit Kontern am Sack.', minL: 6, steps: [...WARM, WRAP, bag(6, 120, 60, 'Verteidigen, dann am Sack kontern!', { mode: 'opponent', title: 'Sparring am Sack' }), ...COOL] },
+  { id: 'w_counter', cat: 'defensive', icon: '↩️', title: 'Konter-Spezial', goal: 'Verteidigung und sofortige Antwort.', minL: 6, steps: [...WARM, WRAP, bag(4, 120, 60, 'Jede Kombination mit Verteidigung.'), ...COOL] },
+  { id: 'w_pads', cat: 'zuzweit', icon: '🎯', title: 'Pratzen zu zweit', goal: 'Mit Partner: Ansagen für Boxer und Halter.', steps: [...WARM, bag(5, 120, 60, 'Boxer schlägt, Halter hält die Pratzen.', { mode: 'pads2', title: 'Pratzen-Drill', ...NOBAG }), ...COOL] },
+  { id: 'w_core', cat: 'kraft', icon: '💪', title: 'Kraft & Bauch', goal: 'Ohne Geräte: Arme, Rumpf, Beine.', steps: [...WARM, reps('Liegestütze', 3, '8–15', 'Auch auf den Knien erlaubt.'), reps('Unterarmstütz (Plank)', 3, '30 Sek.', 'Körper gerade.', { hold: 30 }), reps('Burpees', 3, '8', 'Runter, hoch, springen.'), reps('Superman', 3, '20 Sek.', 'Auf dem Bauch, Arme und Beine anheben.', { hold: 20 }), reps('Russian Twists', 3, '20', 'Oberkörper zurücklehnen, links-rechts drehen.'), ...COOL] },
+  { id: 'w_pull', cat: 'kraft', icon: '🏋️', title: 'Klimmzug-Leiter', goal: 'Mehr Zugkraft für starke Haken.', need: 'bar', steps: [...WARM, reps('Klimmzug-Leiter', 5, '1 → 5', 'Satz 1: ein Klimmzug, Satz 2: zwei … bis fünf. Negative erlaubt.', { pull: 3 }), reps('An der Stange hängen', 2, '30 Sek.', 'Locker hängen, Schultern leicht runterziehen.', { hold: 30 }), ...COOL] },
+  { id: 'w_speed', cat: 'technik', icon: '✊', title: 'Speed mit Knöchelhandschuhen', goal: 'Tempo und Präzision mit 70–80 % Kraft.', need: 'knuckle', steps: [...WARM, WRAP, bag(4, 120, 60, 'Schnell und genau – nicht hart!', { knuckle: true }), ...COOL] },
+  { id: 'w_champ', cat: 'kondition', icon: '🏆', title: 'Championship 12', goal: '12 Runden à 3 Minuten. Nur für Fortgeschrittene!', minL: 12, steps: [...WARM, WRAP, bag(12, 180, 60, 'Championship Rounds. Teile dir die Kraft ein.'), ...COOL] },
+  { id: 'w_mobility', cat: 'erholung', icon: '😌', title: 'Erholung & Mobility', goal: '10 Minuten lockere Bewegung.', steps: REGEN.steps },
+  { id: 'w_stretch', cat: 'erholung', icon: '🧘', title: 'Dehnen nach dem Training', goal: '6 Minuten für Schultern, Hüfte und Unterarme.', steps: [...COOL, { type: 'timed', title: 'Hüfte dehnen', sec: 60, icon: '🧘', cue: 'Ausfallschritt, hinteres Knie am Boden, Hüfte nach vorne schieben. Nach der Hälfte wechseln.' }, { type: 'timed', title: 'Unterarme dehnen', sec: 45, icon: '✋', cue: 'Arm nach vorne, Finger sanft zu dir ziehen. Nach der Hälfte wechseln.' }] },
+];
+const CATS = [['all', 'Alle'], ['fav', '❤️ Favoriten'], ['mine', '⭐ Meine'], ['technik', 'Technik'], ['kondition', 'Kondition'], ['power', 'Power'], ['defensive', 'Verteidigung'], ['kraft', 'Kraft'], ['erholung', 'Erholung'], ['zuzweit', 'Zu zweit']];
+const FOCI = [['technik', '🥊 Technik'], ['power', '💥 Power'], ['opponent', '🛡️ Gegner-Modus'], ['pads2', '🎯 Pratzen zu zweit'], ['speed', '✊ Speed'], ['shadow', '👤 Schattenboxen']];
+function buildMyWorkout(w) {
+  const noBag = w.focus === 'opponent' || w.focus === 'pads2' || w.focus === 'shadow';
+  const opts = { title: w.name, ...(w.focus === 'opponent' ? { mode: 'opponent' } : {}), ...(w.focus === 'pads2' ? { mode: 'pads2' } : {}), ...(w.focus === 'speed' ? { knuckle: true } : {}), ...(noBag ? NOBAG : {}) };
+  const note = { technik: 'Saubere Technik!', power: 'Kräftig schlagen – Hüfte drehen!', opponent: 'Verteidige und konter!', pads2: 'Boxer schlägt, Halter hält.', speed: 'Schnell und genau – 70–80 % Kraft.', shadow: 'Schattenboxen – in die Luft.' }[w.focus];
+  return [...(w.warm ? WARM : []), ...(!noBag ? [WRAP] : []), bag(w.rounds, w.work, w.rest, note, opts), ...(w.cool ? COOL : [])];
+}
+
+function IntensityPicker({ app, compact }) {
+  const { state, update } = app;
+  const cur = state.settings.intensity || 'mittel';
+  const OPTS = [['leicht', '🙂', 'Leicht', 'Kurze Kombis, mehr Zeit'], ['mittel', '😤', 'Mittel', 'Normales Tempo'], ['hart', '🔥', 'Hart', 'Lange Kombis, schnelle Ansagen']];
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {OPTS.map(([v, e, l, s]) => (
+        <button key={v} onClick={() => update(st => ({ ...st, settings: { ...st.settings, intensity: v } }))} className={'rounded-xl border px-2 py-2 text-center transition ' + (cur === v ? 'border-gold bg-gold/15' : 'border-white/10 bg-coal')}>
+          <div className={compact ? 'text-base' : 'text-xl'}>{e}</div>
+          <div className={'text-xs ' + (cur === v ? 'text-gold' : 'text-stone-200')}>{l}</div>
+          {!compact && <div className="mt-0.5 text-[10px] leading-tight text-stone-500">{s}</div>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorkoutsTab({ app }) {
+  const { state, update, openLesson, toast } = app;
+  const [cat, setCat] = useState('all');
+  const [builder, setBuilder] = useState(null);
+  const done = state.path.done.length;
+  const favs = state.favs;
+  const mine = state.myWorkouts.map(w => ({ id: w.id, cat: 'mine', icon: '⭐', title: w.name, goal: w.rounds + ' × ' + fmt(w.work) + ' · ' + (FOCI.find(f => f[0] === w.focus) || [, ''])[1], steps: buildMyWorkout(w), mine: w }));
+  const all = [...mine, ...LIB];
+  const list = all.filter(w => cat === 'all' ? !w.mine : cat === 'fav' ? favs.includes(w.id) : cat === 'mine' ? !!w.mine : w.cat === cat);
+  const toggleFav = id => update(s => ({ ...s, favs: s.favs.includes(id) ? s.favs.filter(x => x !== id) : [...s.favs, id] }));
+  const open = w => openLesson({ ...w, kind: 'workout', learns: [] });
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="font-display text-2xl uppercase text-stone-50">Workouts</div>
+        <p className="text-sm text-stone-400">Fertige Trainings zum Loslegen – zusätzlich zu deinen Lektionen.</p>
+      </div>
+      <Card>
+        <div className="mb-2 text-xs uppercase tracking-wider text-stone-500">Coach-Intensität</div>
+        <IntensityPicker app={app} compact />
+      </Card>
+      <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1">
+        {CATS.map(([v, l]) => <button key={v} onClick={() => setCat(v)} className={'shrink-0 rounded-full border px-3.5 py-1.5 text-xs transition ' + (cat === v ? 'border-gold bg-gold text-ink' : 'border-white/10 bg-anth text-stone-300')}>{l}</button>)}
+      </div>
+      {cat === 'mine' && <BigBtn kind="gold" onClick={() => setBuilder({ id: null, name: '', focus: 'technik', rounds: 4, work: 120, rest: 60, warm: true, cool: true })}>+ Eigenes Workout erstellen</BigBtn>}
+      {list.length === 0 && <p className="py-6 text-center text-sm text-stone-500">{cat === 'fav' ? 'Tippe bei einem Workout auf ♡, um es hier zu speichern.' : cat === 'mine' ? 'Noch keine eigenen Workouts.' : 'Nichts gefunden.'}</p>}
+      <div className="space-y-2.5">
+        {list.map(w => {
+          const steps = resolveSteps(w.steps, state.equip);
+          const early = w.minL && done < w.minL;
+          const missing = w.need && !state.equip[w.need];
+          return (
+            <div key={w.id} className="flex items-stretch gap-2">
+              <button onClick={() => open(w)} className={'flex flex-1 items-center gap-3 rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.99] ' + (early || missing ? 'opacity-60' : '')}>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-coal text-2xl">{w.icon}</span>
+                <span className="flex-1">
+                  <span className="block font-display text-base uppercase leading-tight text-stone-100">{w.title}</span>
+                  <span className="block text-xs text-stone-400">{w.goal}</span>
+                  <span className="mt-0.5 block text-[11px] text-stone-500">⏱ ca. {estMinutes(steps, 0)} Min.{early ? ' · empfohlen ab Lektion ' + w.minL : ''}{missing ? ' · braucht ' + ({ bar: 'Klimmzugstange', knuckle: 'Knöchelhandschuhe' })[w.need] : ''}</span>
+                </span>
+              </button>
+              <div className="flex flex-col gap-1.5">
+                <button onClick={() => toggleFav(w.id)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-anth text-lg" aria-label="Favorit">{favs.includes(w.id) ? '❤️' : '♡'}</button>
+                {w.mine && <button onClick={() => setBuilder(w.mine)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-anth text-sm" aria-label="Bearbeiten">✏️</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {cat !== 'mine' && <button onClick={() => setCat('mine')} className="w-full rounded-2xl border border-dashed border-white/20 py-4 text-sm text-stone-300">⭐ Eigenes Workout erstellen</button>}
+      {builder && <WorkoutBuilder app={app} init={builder} onClose={() => setBuilder(null)} />}
+    </div>
+  );
+}
+
+function WorkoutBuilder({ app, init, onClose }) {
+  const { update, toast } = app;
+  const [w, setW] = useState(init);
+  const set = patch => setW(x => ({ ...x, ...patch }));
+  const save = () => {
+    const name = w.name.trim() || 'Mein Workout';
+    update(s => ({ ...s, myWorkouts: w.id ? s.myWorkouts.map(x => x.id === w.id ? { ...w, name } : x) : [...s.myWorkouts, { ...w, name, id: 'm' + Date.now() }] }));
+    toast('Workout gespeichert'); onClose();
+  };
+  const del = () => { update(s => ({ ...s, myWorkouts: s.myWorkouts.filter(x => x.id !== w.id), favs: s.favs.filter(x => x !== w.id) })); onClose(); };
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 sm:items-center" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/10 bg-anth p-5 sm:rounded-3xl" onClick={e => e.stopPropagation()}>
+        <h3 className="font-display text-2xl uppercase text-stone-50">{w.id ? 'Workout bearbeiten' : 'Eigenes Workout'}</h3>
+        <input value={w.name} onChange={e => set({ name: e.target.value })} maxLength={30} placeholder="Name, z. B. Abend-Runden" className="mt-3 w-full rounded-xl border border-white/10 bg-coal px-3 py-3 text-stone-100 outline-none focus:border-gold" />
+        <div className="mt-3 text-xs uppercase tracking-wider text-stone-500">Schwerpunkt</div>
+        <div className="mt-1.5 grid grid-cols-2 gap-2">
+          {FOCI.map(([v, l]) => <button key={v} onClick={() => set({ focus: v })} className={'rounded-xl border px-3 py-2.5 text-left text-sm ' + (w.focus === v ? 'border-gold bg-gold/15 text-gold' : 'border-white/10 text-stone-300')}>{l}</button>)}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <Stepper label="Runden" value={w.rounds} min={1} max={15} onChange={v => set({ rounds: v })} />
+          <Stepper label="Arbeit" value={w.work} min={20} max={300} step={w.work < 60 ? 10 : 30} fmtv={fmt} onChange={v => set({ work: v })} />
+          <Stepper label="Pause" value={w.rest} min={0} max={120} step={w.rest < 30 ? 5 : 15} fmtv={fmt} onChange={v => set({ rest: v })} />
+        </div>
+        <div className="mt-3 space-y-2">
+          <Toggle on={w.warm} onChange={v => set({ warm: v })} label="Mit Aufwärmen (5 Min.)" />
+          <Toggle on={w.cool} onChange={v => set({ cool: v })} label="Mit Dehnen am Schluss" />
+        </div>
+        <div className="mt-4 space-y-2">
+          <BigBtn kind="gold" onClick={save}>Speichern</BigBtn>
+          {w.id && <BigBtn kind="ghost" onClick={del}>Löschen</BigBtn>}
+          <button onClick={onClose} className="w-full py-2 text-sm text-stone-500">Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Kombi-Baukasten ---------- */
+const CTOK = [['1', 'Jab', 'Jab'], ['2', 'Gerade', 'Gerade'], ['3', 'Haken', 'Haken'], ['4', 'Hint. Haken', 'hinterer Haken'], ['5', 'Aufw.-Haken', 'Aufwärtshaken'], ['6', 'Hint. Aufw.', 'hinterer Aufwärtshaken'], ['K', 'Körper', 'zum Körper'], ['S', 'Pendeln', 'Pendeln'], ['R', 'Abrollen', 'Abrollen'], ['B', 'Blocken', 'Blocken'], ['Z', 'Zurück', 'Schritt zurück'], ['P', 'Pivot', 'Pivot']];
+function ComboBuilder({ app }) {
+  const { state, update, toast } = app;
+  const [toks, setToks] = useState([]);
+  const [nums, setNums] = useState(false);
+  const words = ['eins', 'zwei', 'drei', 'vier', 'fünf', 'sechs'];
+  const text = toks.map(t => { const d = CTOK.find(c => c[0] === t); const n = '123456'.indexOf(t); return nums && n >= 0 ? words[n] : d[2]; }).join(', ').replace(/^./, c => c.toUpperCase()) + (toks.length ? '!' : '');
+  const save = () => { if (!toks.length) return; update(s => ({ ...s, combos: [...s.combos, { id: 'k' + Date.now(), text, on: true }] })); setToks([]); toast('Kombination gespeichert'); };
+  return (
+    <div className="space-y-4">
+      <Card>
+        <H2 sub="Tippe die Schläge in der richtigen Reihenfolge">Neue Kombination</H2>
+        <div className="grid grid-cols-4 gap-1.5">
+          {CTOK.map(([k, l]) => <button key={k} disabled={toks.length >= 8} onClick={() => setToks(t => [...t, k])} className="rounded-xl border border-white/10 bg-coal py-2.5 text-center active:scale-95 disabled:opacity-40"><div className="font-display text-lg text-gold">{'123456'.includes(k) ? k : '•'}</div><div className="text-[10px] leading-tight text-stone-300">{l}</div></button>)}
+        </div>
+        <div className="mt-3 min-h-[3rem] rounded-xl bg-ink/60 p-3 font-display text-lg uppercase text-gold">{toks.length ? text : <span className="text-sm normal-case text-stone-500">Noch leer</span>}</div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Btn kind="ghost" onClick={() => setToks(t => t.slice(0, -1))} disabled={!toks.length}>⌫ Zurück</Btn>
+          <Btn kind="ghost" onClick={() => { ac(); speak(text, state.settings.rate); }} disabled={!toks.length}>🔊 Anhören</Btn>
+          <Btn onClick={save} disabled={!toks.length}>Speichern</Btn>
+        </div>
+        <div className="mt-3"><Toggle on={nums} onChange={setNums} label="Zahlen ansagen (eins, zwei …)" /></div>
+      </Card>
+      <Card>
+        <H2 sub="Aktive Kombinationen ruft der Coach in deinen Runden mit auf">Meine Kombinationen</H2>
+        {state.combos.length === 0 ? <p className="text-sm text-stone-400">Noch keine eigenen Kombinationen.</p> : (
+          <div className="space-y-2">
+            {state.combos.map(c => (
+              <div key={c.id} className="flex items-center gap-2 rounded-xl border border-white/10 bg-coal p-2.5">
+                <span className={'flex-1 font-display text-sm uppercase ' + (c.on ? 'text-stone-100' : 'text-stone-500')}>{c.text}</span>
+                <button onClick={() => { ac(); speak(c.text, state.settings.rate); }} className="px-1 text-lg" aria-label="Anhören">🔊</button>
+                <Toggle on={c.on} onChange={v => update(s => ({ ...s, combos: s.combos.map(x => x.id === c.id ? { ...x, on: v } : x) }))} label="" />
+                <button onClick={() => update(s => ({ ...s, combos: s.combos.filter(x => x.id !== c.id) }))} className="px-1 text-stone-500" aria-label="Löschen">🗑</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---------- Woche & Challenges ---------- */
+const weekStart = k => addDays(k, -(weekdayIdx(keyToDate(k)) - 1));
+function weekData(state, start, glasses) {
+  const end = addDays(start, 6);
+  const L = state.log.filter(l => l.d >= start && l.d <= end);
+  const w = { days: new Set(L.map(l => l.d)).size, rounds: 0, punches: 0, min: 0, opp: 0, regen: 0, lessons: 0, water: 0, pull: 0, videos: state.videoLog.filter(d => d >= start && d <= end).length, allGoals: 0 };
+  L.forEach(l => { w.rounds += l.rounds || 0; w.punches += l.punches || 0; w.min += l.min || 0; if (l.opp) w.opp++; if (l.kind === 'regen' || l.cat === 'erholung') w.regen++; if (l.kind === 'lesson') w.lessons++; });
+  for (let i = 0; i < 7; i++) { const r = getDay(state, addDays(start, i)); if (r.water >= glasses) w.water++; w.pull += r.pullups || 0; }
+  return w;
+}
+const CHALLENGES = [
+  { id: 'days3', icon: '📅', t: '3 Trainingstage', v: w => w.days, goal: 3 },
+  { id: 'rounds10', icon: '🔔', t: '10 Sack-Runden', v: w => w.rounds, goal: 10 },
+  { id: 'punch1500', icon: '🥊', t: '1500 Schläge (geschätzt)', v: w => w.punches, goal: 1500 },
+  { id: 'min90', icon: '⏱', t: '90 Minuten Training', v: w => w.min, goal: 90 },
+  { id: 'opp1', icon: '🛡️', t: '1× Gegner-Modus', v: w => w.opp, goal: 1, minL: 6 },
+  { id: 'regen1', icon: '😌', t: '1 Erholungs-Session', v: w => w.regen, goal: 1 },
+  { id: 'water5', icon: '💧', t: 'Wasserziel an 5 Tagen', v: w => w.water, goal: 5 },
+  { id: 'pull30', icon: '🏋️', t: '30 Klimmzüge', v: w => w.pull, goal: 30, need: 'bar' },
+  { id: 'video1', icon: '🎥', t: '1 Technik-Check per Video', v: w => w.videos, goal: 1 },
+  { id: 'lesson2', icon: '📖', t: '2 Lektionen schaffen', v: w => w.lessons, goal: 2, path: true },
+];
+function weekChallenges(state, wk) {
+  let h = 0; for (const ch of wk) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const ok = CHALLENGES.filter(c => (!c.need || state.equip[c.need]) && (!c.minL || state.path.done.length >= c.minL) && (!c.path || state.path.done.length < LESSONS.length));
+  const res = []; const pool = [...ok];
+  while (res.length < 3 && pool.length) { h = (h * 1103515245 + 12345) >>> 0; res.push(pool.splice(h % pool.length, 1)[0]); }
+  return res;
+}
+function ChallengesCard({ app, mini }) {
+  const { state, update, tKey, d, toast, go } = app;
+  const wk = weekStart(tKey);
+  const w = weekData(state, wk, d.n.glasses);
+  const list = weekChallenges(state, wk);
+  const claimed = state.challenges[wk] || [];
+  const claim = c => { update(s => ({ ...s, challenges: { ...s.challenges, [wk]: [...(s.challenges[wk] || []), c.id] } })); toast('🏅 Challenge geschafft! +50 XP'); };
+  const daysLeft = 7 - weekdayIdx(keyToDate(tKey));
+  return (
+    <div className={'rounded-3xl border border-white/10 bg-anth p-4 ' + (mini ? 'cursor-pointer' : '')} onClick={mini ? () => go('progress') : undefined}>
+      <div className="flex items-end justify-between">
+        <div className="font-display text-lg uppercase tracking-wider text-stone-100">Wochen-Challenges</div>
+        <div className="text-xs text-stone-500">{daysLeft === 0 ? 'letzter Tag' : 'noch ' + daysLeft + (daysLeft === 1 ? ' Tag' : ' Tage')}</div>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {list.map(c => {
+          const v = Math.min(c.v(w), c.goal), isDone = v >= c.goal, isClaimed = claimed.includes(c.id);
+          return (
+            <div key={c.id}>
+              <div className="flex items-center gap-2 text-sm">
+                <span>{c.icon}</span><span className={'flex-1 ' + (isClaimed ? 'text-stone-500 line-through' : 'text-stone-200')}>{c.t}</span>
+                {isDone && !isClaimed && !mini ? <button onClick={() => claim(c)} className="rounded-full bg-gold px-3 py-1 text-xs font-medium text-ink">+50 XP holen</button>
+                  : <span className="text-xs tabular-nums text-stone-500">{isClaimed ? '✓' : Math.round(v) + '/' + c.goal}</span>}
+              </div>
+              <div className="mt-1"><Bar v={v / c.goal} color={isDone ? 'bg-gold' : 'bg-blood'} /></div>
+            </div>
+          );
+        })}
+      </div>
+      {mini && list.some(c => c.v(w) >= c.goal && !claimed.includes(c.id)) && <div className="mt-3 text-center text-xs text-gold">🏅 Eine Challenge ist geschafft – tippen zum Abholen</div>}
+    </div>
+  );
+}
+
+/* ---------- Gewicht ---------- */
+function WeightCard({ app }) {
+  const { state, update, tKey, toast } = app;
+  const W = [...state.weights].sort((a, b) => a.d < b.d ? -1 : 1);
+  const last = W[W.length - 1];
+  const [kg, setKg] = useState(last ? last.kg : state.profile.weight);
+  const save = () => {
+    const v = Math.round(kg * 10) / 10;
+    update(s => ({ ...s, weights: [...s.weights.filter(x => x.d !== tKey), { d: tKey, kg: v }], profile: { ...s.profile, weight: Math.round(v) } }));
+    toast('Gewicht eingetragen – Essensplan angepasst');
+  };
+  const pts = W.slice(-12);
+  const min = Math.min(...pts.map(p => p.kg)) - 1, max = Math.max(...pts.map(p => p.kg)) + 1;
+  const X = i => 24 + i * (292 / Math.max(1, pts.length - 1)), Y = v => 110 - (v - min) / (max - min || 1) * 90;
+  const diff = pts.length >= 2 ? Math.round((pts[pts.length - 1].kg - pts[0].kg) * 10) / 10 : null;
+  return (
+    <Card>
+      <H2 sub="Einmal pro Woche wiegen reicht – am besten morgens">Gewicht</H2>
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-coal p-2">
+          <button onClick={() => setKg(v => Math.round((v - 0.1) * 10) / 10)} className="h-9 w-9 rounded-lg bg-white/10 text-lg">−</button>
+          <input type="number" inputMode="decimal" step="0.1" value={kg} onChange={e => setKg(parseFloat(e.target.value.replace(',', '.')) || 0)} className="w-20 bg-transparent text-center font-display text-2xl text-stone-50 outline-none" />
+          <button onClick={() => setKg(v => Math.round((v + 0.1) * 10) / 10)} className="h-9 w-9 rounded-lg bg-white/10 text-lg">+</button>
+        </div>
+        <Btn onClick={save} disabled={!(kg > 20 && kg < 250)}>Eintragen</Btn>
+      </div>
+      {pts.length >= 2 ? (
+        <div className="mt-3">
+          <svg viewBox="0 0 340 130" className="w-full">
+            <line x1="24" y1="110" x2="316" y2="110" stroke="rgba(255,255,255,0.1)" />
+            <polyline points={pts.map((p, i) => X(i) + ',' + Y(p.kg)).join(' ')} fill="none" stroke={GOLD} strokeWidth="2.5" strokeLinejoin="round" />
+            {pts.map((p, i) => <circle key={i} cx={X(i)} cy={Y(p.kg)} r="3.5" fill={GOLD} />)}
+            <text x="24" y="126" fill="#78716c" fontSize="10">{pts[0].d.slice(8, 10) + '.' + pts[0].d.slice(5, 7) + '.'}</text>
+            <text x="316" y="126" fill="#78716c" fontSize="10" textAnchor="end">{last.d.slice(8, 10) + '.' + last.d.slice(5, 7) + '.'}</text>
+            <text x={X(pts.length - 1)} y={Y(last.kg) - 8} fill="#e7e3da" fontSize="11" textAnchor="end">{String(last.kg).replace('.', ',')} kg</text>
+          </svg>
+          <p className="text-xs text-stone-500">Seit {pts[0].d.slice(8, 10)}.{pts[0].d.slice(5, 7)}.: {diff > 0 ? '+' : ''}{String(diff).replace('.', ',')} kg</p>
+        </div>
+      ) : <p className="mt-2 text-xs text-stone-500">{last ? 'Ab dem zweiten Eintrag siehst du hier deine Kurve.' : 'Noch kein Eintrag.'}</p>}
+    </Card>
+  );
+}
+
+/* ---------- Fortschritt (Kalender, Statistik, Rekorde) ---------- */
+function ProgressTab({ app }) {
+  const { state, d, tKey } = app;
+  const [mOff, setMOff] = useState(0);
+  const base = keyToDate(tKey); const first = new Date(base.getFullYear(), base.getMonth() + mOff, 1);
+  const daysIn = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const lead = (first.getDay() + 6) % 7;
+  const monthName = first.toLocaleDateString('de-CH', { month: 'long', year: 'numeric' });
+  const logByDay = {}; state.log.forEach(l => { logByDay[l.d] = (logByDay[l.d] || 0) + (l.min || 0); });
+  const weeks = []; let ws = weekStart(tKey);
+  for (let i = 7; i >= 0; i--) { const s = addDays(ws, -7 * i); const e = addDays(s, 6); weeks.push({ s, min: state.log.filter(l => l.d >= s && l.d <= e).reduce((a, l) => a + (l.min || 0), 0) }); }
+  const maxW = Math.max(30, ...weeks.map(w => w.min));
+  const T = d.totals, B = d.best;
+  const recent = [...state.log].sort((a, b) => b.t - a.t).slice(0, 6);
+  return (
+    <div className="space-y-4">
+      <div className="font-display text-2xl uppercase text-stone-50">Deine Erfolge</div>
+      <div className="grid grid-cols-2 gap-2">
+        {[['🥊', T.sessions, 'Trainings'], ['⏱', T.minutes, 'Minuten'], ['🔔', T.rounds, 'Runden'], ['💥', T.punches.toLocaleString('de-CH'), 'Schläge (geschätzt)']].map(([e, v, l]) => (
+          <div key={l} className="rounded-2xl border border-white/10 bg-anth p-3">
+            <div className="text-xl">{e}</div><div className="font-display text-2xl text-stone-50">{v}</div><div className="text-[11px] uppercase tracking-wider text-stone-500">{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <button onClick={() => setMOff(m => m - 1)} className="h-8 w-8 rounded-lg bg-white/10">‹</button>
+          <div className="font-display text-lg uppercase text-stone-100">{monthName}</div>
+          <button onClick={() => setMOff(m => Math.min(0, m + 1))} disabled={mOff === 0} className="h-8 w-8 rounded-lg bg-white/10 disabled:opacity-30">›</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase text-stone-500">{['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(x => <div key={x}>{x}</div>)}</div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {Array.from({ length: lead }).map((_, i) => <div key={'e' + i}></div>)}
+          {Array.from({ length: daysIn }).map((_, i) => {
+            const k = todayKey(new Date(first.getFullYear(), first.getMonth(), i + 1));
+            const trained = getDay(state, k).workout, isToday = k === tKey, future = k > tKey;
+            return <div key={k} className={'flex aspect-square items-center justify-center rounded-lg text-xs ' + (trained ? 'bg-gold font-medium text-ink' : future ? 'text-stone-700' : 'bg-white/5 text-stone-400') + (isToday ? ' ring-2 ring-blood' : '')}>{i + 1}</div>;
+          })}
+        </div>
+        <div className="mt-2 flex items-center gap-3 text-[11px] text-stone-500"><span className="inline-block h-3 w-3 rounded bg-gold"></span> trainiert <span className="inline-block h-3 w-3 rounded ring-2 ring-blood"></span> heute</div>
+      </Card>
+
+      <Card>
+        <H2 sub="Trainingsminuten der letzten 8 Wochen">Wochen-Verlauf</H2>
+        <div className="flex h-32 items-end gap-1.5">
+          {weeks.map((w, i) => (
+            <div key={w.s} className="flex flex-1 flex-col items-center gap-1">
+              <div className="text-[10px] text-stone-500">{w.min || ''}</div>
+              <div className={'w-full rounded-t-md ' + (i === weeks.length - 1 ? 'bg-gold' : 'bg-blood/70')} style={{ height: Math.max(3, w.min / maxW * 90) + 'px' }}></div>
+              <div className="text-[9px] text-stone-600">{w.s.slice(8, 10)}.{w.s.slice(5, 7)}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <H2 sub="Schlag deine eigenen Rekorde">Bestwerte</H2>
+        <div className="grid grid-cols-2 gap-2">
+          {[['Längstes Training', B.min + ' Min.'], ['Meiste Runden', B.rounds], ['Meiste Schläge', B.punches], ['Längste Serie', d.longest + ' Tage']].map(([l, v]) => (
+            <div key={l} className="rounded-xl bg-coal p-3"><div className="font-display text-xl text-gold">{v}</div><div className="text-[11px] text-stone-500">{l}</div></div>
+          ))}
+        </div>
+      </Card>
+
+      <ChallengesCard app={app} />
+      <WeightCard app={app} />
+
+      {recent.length > 0 && (
+        <Card>
+          <H2>Letzte Trainings</H2>
+          <div className="space-y-1.5">
+            {recent.map(l => (
+              <div key={l.t} className="flex items-center gap-3 border-b border-white/5 pb-1.5 text-sm">
+                <span className="w-12 shrink-0 text-xs text-stone-500">{l.d.slice(8, 10)}.{l.d.slice(5, 7)}.</span>
+                <span className="flex-1 truncate text-stone-200">{l.title}</span>
+                <span className="shrink-0 text-xs text-stone-500">{l.min} Min.{l.punches ? ' · ' + l.punches + ' 💥' : ''}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      <TrophyPanel app={app} />
+    </div>
+  );
+}
+
+/* ---------- Video-Check ---------- */
+function VideoCheck({ app, known }) {
+  const { state, update, tKey, toast } = app;
+  const lefty = state.profile.hand === 'l';
+  const opts = TECH_ORDER.filter(id => known.includes(id) && id !== 'knuckle');
+  const [tech, setTech] = useState(opts[opts.length - 1] || null);
+  const [url, setUrl] = useState(null);
+  const [mirror, setMirror] = useState(true);
+  const [rate, setRate] = useState(1);
+  const [checks, setChecks] = useState({});
+  const vref = useRef(null), fref = useRef(null);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  useEffect(() => { if (vref.current) vref.current.playbackRate = rate; }, [rate, url]);
+  if (!opts.length) return null;
+  const T = TECH[tech];
+  const items = [...T.points(lefty), 'Kein Fehler: ' + T.mistake];
+  const onFile = e => { const f = e.target.files && e.target.files[0]; if (!f) return; if (url) URL.revokeObjectURL(url); setUrl(URL.createObjectURL(f)); setChecks({}); e.target.value = ''; };
+  const finish = () => { update(s => ({ ...s, videoLog: [...s.videoLog, tKey] })); toast('🎥 Video-Check gespeichert'); setUrl(null); setChecks({}); };
+  return (
+    <Card className="border-gold/30">
+      <H2 sub="Film dich und vergleiche mit der richtigen Technik">🎥 Technik-Check per Video</H2>
+      <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+        {opts.map(id => <button key={id} onClick={() => { setTech(id); setChecks({}); }} className={'shrink-0 rounded-full border px-3 py-1.5 text-xs ' + (tech === id ? 'border-gold bg-gold text-ink' : 'border-white/10 bg-coal text-stone-300')}>{TECH[id].name}</button>)}
+      </div>
+      <input ref={fref} type="file" accept="video/*" className="hidden" onChange={onFile} />
+      {!url ? (
+        <div className="mt-3">
+          <div className="flex items-center gap-3 rounded-2xl bg-coal p-3">
+            <div className="h-20 w-20 shrink-0"><Illu img={T.img} lefty={lefty} className="h-20 w-20" /></div>
+            <p className="text-sm text-stone-300">Stell das iPhone so hin, dass du ganz zu sehen bist. Film 20–30 Sekunden «{T.name}».</p>
+          </div>
+          <div className="mt-3"><BigBtn kind="gold" onClick={() => fref.current && fref.current.click()}>🎥 Video aufnehmen oder wählen</BigBtn></div>
+          <p className="mt-2 text-center text-[11px] text-stone-500">Das Video bleibt auf deinem iPhone – es wird nirgends hochgeladen.</p>
+        </div>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <video ref={vref} src={url} controls playsInline loop className="w-full rounded-2xl bg-black" style={{ transform: mirror ? 'scaleX(-1)' : 'none' }} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[0.25, 0.5, 1].map(r => <button key={r} onClick={() => setRate(r)} className={'rounded-lg border px-3 py-1.5 text-xs ' + (rate === r ? 'border-gold bg-gold/15 text-gold' : 'border-white/10 text-stone-400')}>{String(r).replace('.', ',')}×</button>)}
+            <button onClick={() => setMirror(m => !m)} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-stone-400">⇋ Spiegeln</button>
+          </div>
+          <div className="flex items-start gap-3 rounded-2xl bg-coal p-3">
+            <div className="h-24 w-24 shrink-0"><Illu img={T.img} lefty={lefty} className="h-24 w-24" /></div>
+            <div className="text-xs text-stone-400">So soll es aussehen. Schau dein Video in Zeitlupe und hake ab, was schon klappt.</div>
+          </div>
+          <div className="space-y-2">{items.map((it, i) => <Check key={i} checked={!!checks[i]} label={it} onChange={() => setChecks(c => ({ ...c, [i]: !c[i] }))} />)}</div>
+          <p className="text-center text-sm text-stone-300">{Object.values(checks).filter(Boolean).length} von {items.length} Punkten passen{Object.values(checks).filter(Boolean).length === items.length ? ' – perfekt! 🔥' : ''}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <BigBtn kind="ghost" onClick={() => fref.current && fref.current.click()}>Neues Video</BigBtn>
+            <BigBtn kind="gold" onClick={finish}>Check fertig</BigBtn>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ---------- Einkaufsliste ---------- */
+const RAW = { rice: [0.4, 'Reis (trocken)'], pasta: [0.45, 'Vollkornpasta (trocken)'], lentils: [0.4, 'Linsen (trocken)'], chicken: [1.3, 'Pouletbrust (roh)'], salmon: [1.25, 'Lachs (roh)'], beef: [1.3, 'Rindshackfleisch mager (roh)'], sweet: [1.1, 'Süsskartoffeln'], potato: [1.05, 'Kartoffeln'] };
+const SHOP_GROUPS = [['🍗 Eiweiss', ['chicken', 'salmon', 'beef', 'tuna', 'egg', 'quark', 'skyr', 'yog', 'milk', 'lentils']], ['🍚 Kohlenhydrate', ['oats', 'bread', 'rice', 'pasta', 'potato', 'sweet', 'ricecake', 'honey']], ['🥦 Obst & Gemüse', ['banana', 'berries', 'veg', 'tomato', 'avo']], ['🥜 Fett', ['nuts', 'oil']]];
+function weekShopping(n) {
+  const sum = {};
+  for (let d = 1; d <= 7; d++) {
+    const rest = d >= 6;
+    const T = { p: n.prot, f: n.fat, c: rest ? Math.round(n.carbs * 0.75) : n.carbs };
+    MEALS_PLAN.forEach((m, i) => {
+      const v = m.variants[(d + i) % 3];
+      const share = rest && m.id === 'snack' ? { p: 0.1, c: 0.12, f: 0.08 } : m.share;
+      const r = solveMeal(v, { p: T.p * share.p, c: T.c * share.c, f: T.f * share.f });
+      Object.entries(r.g).forEach(([k, g]) => { sum[k] = (sum[k] || 0) + g; });
+    });
+  }
+  return sum;
+}
+function shopAmount(k, g) {
+  const F = FOODS[k];
+  if (k === 'egg' || k === 'banana' || k === 'ricecake') return Math.ceil(g / F.unit) + ' Stk';
+  if (k === 'bread') return Math.ceil(g / F.unit) + ' Scheiben (≈ ' + Math.ceil(g / 500) + ' Brot)';
+  if (k === 'oil') return '≈ ' + Math.ceil(g / 10) * 10 + ' ml';
+  if (k === 'tuna') return Math.ceil(g / 130) + ' Dosen';
+  if (k === 'milk') return (Math.ceil(g / 250) * 0.25).toString().replace('.', ',') + ' l';
+  const raw = RAW[k] ? g * RAW[k][0] : g;
+  const r = Math.ceil(raw / 50) * 50;
+  return r >= 1000 ? (Math.round(r / 100) / 10).toString().replace('.', ',') + ' kg' : r + ' g';
+}
+function ShoppingList({ app }) {
+  const { state, update, d, tKey, toast } = app;
+  const wk = weekStart(tKey);
+  const sum = useMemo(() => weekShopping(d.n), [d.n.prot, d.n.fat, d.n.carbs]);
+  const checked = state.shop[wk] || {};
+  const toggle = k => update(s => ({ ...s, shop: { [wk]: { ...(s.shop[wk] || {}), [k]: !(s.shop[wk] || {})[k] } } }));
+  const name = k => RAW[k] ? RAW[k][1] : FOODS[k].n.replace(/ \(.*\)$/, '');
+  const text = SHOP_GROUPS.map(([g, ks]) => g + '\n' + ks.filter(k => sum[k]).map(k => '- ' + name(k) + ': ' + shopAmount(k, sum[k])).join('\n')).join('\n\n');
+  const copy = async () => { try { await navigator.clipboard.writeText('Einkaufsliste Fight Camp\n\n' + text); toast('Liste kopiert ✓'); } catch (e) { toast('Kopieren nicht möglich'); } };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-stone-400">Für eine Woche nach deinem Essensplan ({state.profile.weight} kg, 5 Trainingstage + 2 Ruhetage). Fleisch und Beilagen sind als Einkaufsmenge angegeben (roh/trocken).</p>
+      {SHOP_GROUPS.map(([g, ks]) => (
+        <Card key={g}>
+          <div className="mb-2 font-display text-lg uppercase tracking-wider text-stone-100">{g}</div>
+          <div className="space-y-1.5">
+            {ks.filter(k => sum[k]).map(k => (
+              <button key={k} onClick={() => toggle(k)} className="flex w-full items-center gap-3 border-b border-white/5 pb-1.5 text-left text-sm">
+                <span className={'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ' + (checked[k] ? 'border-gold bg-gold text-ink' : 'border-white/30')}>{checked[k] ? '✓' : ''}</span>
+                <span className={'flex-1 ' + (checked[k] ? 'text-stone-500 line-through' : 'text-stone-200')}>{name(k)}</span>
+                <span className={'shrink-0 font-display ' + (checked[k] ? 'text-stone-600' : 'text-stone-50')}>{shopAmount(k, sum[k])}</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      ))}
+      <div className="grid grid-cols-2 gap-2">
+        <BigBtn kind="gold" onClick={copy}>📋 Kopieren</BigBtn>
+        <BigBtn kind="ghost" onClick={() => update(s => ({ ...s, shop: { [wk]: {} } }))}>Haken löschen</BigBtn>
+      </div>
+      <p className="text-xs text-stone-500">Tipp: Kopieren und in die Notizen oder Erinnerungen einfügen. Mengen sind grob aufgerundet.</p>
+    </div>
+  );
+}
+
+/* ---------- Home-Extras ---------- */
+function HomeExtras({ app }) {
+  const { state, go, tKey, d } = app;
+  const W = [...state.weights].sort((a, b) => a.d < b.d ? -1 : 1);
+  const last = W[W.length - 1];
+  const needWeigh = !d.n.minor && (!last || last.d <= addDays(tKey, -7));
+  return (
+    <div className="space-y-3">
+      <ChallengesCard app={app} mini />
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => go('workouts')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
+          <div className="text-2xl">🗂</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Workouts</div><div className="text-[11px] text-stone-500">{LIB.length} fertige Trainings</div>
+        </button>
+        {needWeigh ? (
+          <button onClick={() => go('progress')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
+            <div className="text-2xl">⚖️</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Wiegen</div><div className="text-[11px] text-stone-500">Damit dein Essensplan passt</div>
+          </button>
+        ) : (
+          <button onClick={() => go('learn')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
+            <div className="text-2xl">🎥</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Video-Check</div><div className="text-[11px] text-stone-500">Technik überprüfen</div>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
