@@ -256,6 +256,7 @@ const DEFAULT_STATE = {
   profile: { name: '', hand: 'r', weight: 75, height: 178, age: 30, sex: 'm', goal: 'halten', activity: 1.725 },
   settings: { intensity: 'mittel', voiceName: null, pitch: 0.95, voiceOn: true, rate: 1.05, intMin: 8, intMax: 12, level: 'einsteiger' },
   onboarded: false,
+  plan: { days: [1, 3, 5] },
   log: [], weights: [], favs: [], combos: [], myWorkouts: [], challenges: {}, videoLog: [], shop: {},
   goals: { train: true, water: true, food: true, sleep: true, waterL: null, sleepH: 7, custom: [] },
   equip: { bag: true, gloves: true, wraps: true, knuckle: true, bar: true, pads: false },
@@ -273,6 +274,7 @@ function mergeState(raw) {
     profile: { ...DEFAULT_STATE.profile, ...(s.profile || {}) },
     settings: { ...DEFAULT_STATE.settings, ...(s.settings || {}) },
     equip: { ...DEFAULT_STATE.equip, ...(s.equip || {}) },
+    plan: { ...DEFAULT_STATE.plan, ...(s.plan || {}), days: (s.plan && Array.isArray(s.plan.days) && s.plan.days.length) ? s.plan.days : [1, 3, 5] },
     goals: { ...DEFAULT_STATE.goals, ...(s.goals || {}), custom: (s.goals && Array.isArray(s.goals.custom)) ? s.goals.custom : [] },
     path: { ...DEFAULT_STATE.path, ...(s.path || {}), done: (s.path && Array.isArray(s.path.done)) ? s.path.done : [] },
     history: s.history || {},
@@ -1506,7 +1508,7 @@ function estMinutes(steps, adjust = 0) {
     if (x.type === 'learn') s += 60;
     if (x.type === 'check') s += 150;
     if (x.type === 'reps') s += x.sets * ((x.hold || 40) + 45);
-    if (x.type === 'rounds') { const r = Math.max(2, x.rounds + adjust); s += 10 + r * x.work + (r - 1) * x.rest; }
+    if (x.type === 'rounds') { const r = Math.max(2, x.rounds + adjust); s += 10 + r * scaleWork(x.work, adjust) + (r - 1) * scaleRest(x.rest, adjust); }
   });
   return Math.round(s / 60);
 }
@@ -1638,6 +1640,7 @@ function RestScreen({ sec, upcoming, onDone, lefty }) {
 
 function RoundsStep({ step, next, say, known, adjust, onKnuckle, onStat }) {
   const rounds = Math.max(2, step.rounds + adjust);
+  const W = scaleWork(step.work, adjust), R = scaleRest(step.rest, adjust);
   const tk = useTicker();
   const [phase, setPhase] = useState('ready');
   const [round, setRound] = useState(1);
@@ -1648,21 +1651,21 @@ function RoundsStep({ step, next, say, known, adjust, onKnuckle, onStat }) {
   const roundRef = useRef(1);
   const startWork = n => {
     roundRef.current = n; setRound(n); setPhase('work'); setCall(''); flags.current = {}; bell(1);
-    say(step.work <= 30 ? (n === rounds ? 'Letzte! Vollgas!' : 'Los!') : n === rounds ? 'Letzte Runde! Gib alles!' : 'Runde ' + n + '. Los!');
+    say(W <= 30 ? (n === rounds ? 'Letzte! Vollgas!' : 'Los!') : n === rounds ? 'Letzte Runde! Gib alles!' : 'Runde ' + n + '. Los!');
     nextCall.current = Date.now() + 3500;
-    tk.start(step.work, () => {
-      if (onStat) onStat({ rounds: 1, punches: Math.round(step.work / 60 * (step.noBag ? 12 : 20)) });
+    tk.start(W, () => {
+      if (onStat) onStat({ rounds: 1, punches: Math.round(W / 60 * (step.noBag ? 12 : 20)) });
       if (n >= rounds) { bell(3); say('Geschafft! Super gemacht!'); if (step.knuckle) onKnuckle(); next(); }
-      else if (step.rest > 0) { bell(1); setPhase('rest'); setCall(''); say(step.rest >= 20 ? 'Pause. Tief atmen. Gleich kommt Runde ' + (n + 1) + '.' : 'Pause!'); tk.start(step.rest, () => startWork(n + 1), restTick); }
+      else if (R > 0) { bell(1); setPhase('rest'); setCall(''); say(R >= 20 ? 'Pause. Tief atmen. Gleich kommt Runde ' + (n + 1) + '.' : 'Pause!'); tk.start(R, () => startWork(n + 1), restTick); }
       else startWork(n + 1);
     }, workTick);
   };
   const workTick = left => {
-    if (!flags.current.k30 && left <= 30 && left > 0 && step.work >= 60) { flags.current.k30 = true; knock(3); setCall('Noch 30 Sekunden!'); say('Noch 30 Sekunden! Gas geben!'); nextCall.current = Date.now() + 6000; return; }
+    if (!flags.current.k30 && left <= 30 && left > 0 && W >= 60) { flags.current.k30 = true; knock(3); setCall('Noch 30 Sekunden!'); say('Noch 30 Sekunden! Gas geben!'); nextCall.current = Date.now() + 6000; return; }
     if (!flags.current.k10 && left <= 10 && left > 0) { flags.current.k10 = true; knock(2); }
     if (Date.now() >= nextCall.current && left > 4) { const c = gen(); setCall(c); say(typeof c === 'string' ? c : c.say); if (onStat) onStat({ punches: estPunches(c) }); nextCall.current = Date.now() + gap(); }
   };
-  const restTick = left => { if (left === 10 && step.rest > 15) { beep(2, 990); say('Zehn Sekunden. Hände hoch, bereit machen!'); } };
+  const restTick = left => { if (left === 10 && R > 15) { beep(2, 990); say('Zehn Sekunden. Hände hoch, bereit machen!'); } };
   useEffect(() => {
     say((step.noBag ? '' : 'Jetzt an den Sandsack. ') + step.note + ' ' + rounds + ' Runden. Stell dich bereit.');
     tk.start(12, () => startWork(1), l => { if (l <= 3 && l > 0) beep(1, 880); });
@@ -1826,11 +1829,11 @@ function Player({ session, app, onClose }) {
           <div className="w-12 text-right text-xs tabular-nums text-stone-500">{Math.min(i + 1, steps.length)}/{steps.length}</div>
         </div>
         <div className="mt-4 flex flex-1 flex-col">
-          {done ? <DoneScreen xp={65 + (extra.current.wrap ? 10 : 0)} punches={extra.current.punches} record={extra.current.punches > bestBefore.current && bestBefore.current > 0} session={session} isFinal={session.lesson && session.lesson.final} minutes={Math.max(1, Math.round((Date.now() - startedAt.current) / 60000))} onFeedback={v => { update(s => ({ ...s, path: { ...s.path, adjust: clamp((s.path.adjust || 0) + v, -1, 2) } })); onClose(); }} />
+          {done ? <DoneScreen xp={65 + (extra.current.wrap ? 10 : 0)} punches={extra.current.punches} record={extra.current.punches > bestBefore.current && bestBefore.current > 0} session={session} isFinal={session.lesson && session.lesson.final} minutes={Math.max(1, Math.round((Date.now() - startedAt.current) / 60000))} onFeedback={v => { const r = applyFeedback(state, v); update(s => applyFeedback(s, v).st); app.toast(feedbackMsg(v, r.adj, r.inten, r.changedInt)); onClose(); }} />
             : rest ? <RestScreen key={'r' + i} sec={rest.sec} upcoming={steps[i + 1]} onDone={rest.go} />
               : step.type === 'learn' ? <LearnStep key={i} step={step} next={next} say={say} lefty={lefty} />
                 : step.type === 'timed' ? <TimedStep key={i} step={step} next={next} say={say} known={known} lefty={lefty} onStat={onStat} />
-                  : step.type === 'rounds' ? <RoundsStep key={i} step={step} next={next} say={say} known={known} adjust={session.kind === 'lesson' ? (state.path.adjust || 0) : 0} onStat={onStat} onKnuckle={() => { extra.current.knuckle = true; }} />
+                  : step.type === 'rounds' ? <RoundsStep key={i} step={step} next={next} say={say} known={known} adjust={state.path.adjust || 0} onStat={onStat} onKnuckle={() => { extra.current.knuckle = true; }} />
                     : step.type === 'reps' ? <RepsStep key={i} step={step} next={next} say={say} onPull={n => { extra.current.pull += n; }} />
                       : step.type === 'check' ? <CheckStep key={i} next={next} say={say} onWrap={() => { extra.current.wrap = true; }} />
                         : null}
@@ -2283,9 +2286,9 @@ function SettingsPanel({ app }) {
         </div>
       </Card>
       <Card>
-        <H2 sub={'Aktuell: ' + ({ '-1': 'leichter', '0': 'normal', '1': '+1 Runde', '2': '+2 Runden' })[String(state.path.adjust || 0)]}>Schwierigkeit der Sack-Runden</H2>
-        <div className="grid grid-cols-4 gap-2">
-          {[[-1, 'Leichter'], [0, 'Normal'], [1, '+1 Runde'], [2, '+2 Runden']].map(([v, l]) => <button key={v} onClick={() => update(s => ({ ...s, path: { ...s.path, adjust: v } }))} className={'rounded-xl border py-2.5 text-xs ' + ((state.path.adjust || 0) === v ? 'border-gold bg-gold/15 text-gold' : 'border-white/10 text-stone-400')}>{l}</button>)}
+        <H2 sub="Ändert sich auch automatisch mit «Zu leicht» / «Zu schwer» nach dem Training">Schwierigkeit der Runden</H2>
+        <div className="grid grid-cols-3 gap-2">
+          {[[-2, '−2'], [-1, '−1'], [0, 'Normal'], [1, '+1'], [2, '+2'], [3, '+3']].map(([v, l]) => <button key={v} onClick={() => update(s => ({ ...s, path: { ...s.path, adjust: v } }))} className={'rounded-xl border py-2.5 text-xs ' + ((state.path.adjust || 0) === v ? 'border-gold bg-gold/15 text-gold' : 'border-white/10 text-stone-400')}>{l}</button>)}
         </div>
       </Card>
       <BackupCard app={app} />
@@ -2350,8 +2353,8 @@ function BackupCard({ app }) {
 }
 
 /* ---------- App ---------- */
-const NAV = [['home', '🏠', 'Start'], ['training', '🥊', 'Training'], ['technik', '📖', 'Technik'], ['body', '🥦', 'Körper'], ['progress', '🏆', 'Fortschritt']];
-const ROUTES = { home: ['home'], today: ['home'], training: ['training'], lessons: ['training', 'lessons'], workouts: ['training', 'workouts'], timer: ['training', 'timer'], plan: ['training', 'camp'], camp: ['training', 'camp'], technik: ['technik'], learn: ['technik', 'tech'], tech: ['technik', 'tech'], video: ['technik', 'video'], combos: ['technik', 'combos'], guide: ['technik', 'schutz'], schutz: ['technik', 'schutz'], body: ['body'], food: ['body', 'food'], shop: ['body', 'shop'], drink: ['body', 'drink'], weight: ['body', 'weight'], progress: ['progress'], trophy: ['progress', 'trophies'], challenges: ['progress', 'challenges'], settings: ['settings'] };
+const NAV = [['home', '🏠', 'Start'], ['plan', '📅', 'Plan'], ['training', '🥊', 'Training'], ['technik', '📖', 'Technik'], ['body', '🥦', 'Körper'], ['progress', '🏆', 'Fortschritt']];
+const ROUTES = { plan: ['plan'], home: ['home'], today: ['home'], training: ['training'], lessons: ['training', 'lessons'], workouts: ['training', 'workouts'], timer: ['training', 'timer'], camp: ['training', 'camp'], technik: ['technik'], learn: ['technik', 'tech'], tech: ['technik', 'tech'], video: ['technik', 'video'], combos: ['technik', 'combos'], guide: ['technik', 'schutz'], schutz: ['technik', 'schutz'], body: ['body'], food: ['body', 'food'], shop: ['body', 'shop'], drink: ['body', 'drink'], weight: ['body', 'weight'], progress: ['progress'], trophy: ['progress', 'trophies'], challenges: ['progress', 'challenges'], settings: ['settings'] };
 
 function App() {
   const [state, update, sync] = usePersistent();
@@ -2396,6 +2399,7 @@ function App() {
   const openLesson = l => setSheet(l);
   const startLesson = (l, steps) => {
     setSheet(null);
+    if (l.kind === 'regen') { startRegen(); return; }
     if (l.kind === 'workout') {
       const maxIdx = state.path.done.length ? Math.max(...state.path.done.map(lessonIndex)) : 0;
       setSession({ key: Date.now(), id: l.id, kind: 'workout', cat: l.cat, title: l.title, steps, known: l.known || knownUpTo(maxIdx), opp: steps.some(s => s.mode === 'opponent') });
@@ -2432,7 +2436,7 @@ function App() {
 
   return (
     <div className="mx-auto min-h-screen max-w-lg px-4 pb-28 pt-4">
-      <header className="mb-4 flex items-center justify-between">
+      <header className={'mb-4 flex items-center justify-between ' + (tab === 'home' ? 'hidden' : '')}>
         <div className="font-display text-xl uppercase leading-none tracking-[0.12em] text-stone-100">Fight<span className="text-blood">·</span><span className="text-gold">Camp</span></div>
         <div className="flex items-center gap-2">
           <button onClick={() => go('trophy')} className="flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-3 py-1.5">
@@ -2443,7 +2447,8 @@ function App() {
         </div>
       </header>
 
-      <div className={tab === 'home' ? '' : 'hidden'}><Home app={app} /></div>
+      {tab === 'home' && <StartScreen app={app} />}
+      {tab === 'plan' && <PlanTab app={app} />}
       <div className={tab === 'training' ? '' : 'hidden'}><TrainingTab app={app} sub={subs.training} setSub={v => setSub('training', v)} focusWarmup={focusWarmup} /></div>
       {tab === 'technik' && <TechnikTab app={app} sub={subs.technik} setSub={v => setSub('technik', v)} />}
       {tab === 'body' && <BodyTab app={app} sub={subs.body} setSub={v => setSub('body', v)} />}
@@ -2451,7 +2456,7 @@ function App() {
       {tab === 'settings' && <SettingsPage app={app} onBack={() => { setTab(prevTab === 'settings' ? 'home' : prevTab); window.scrollTo({ top: 0 }); }} />}
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-ink/95 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="mx-auto grid max-w-lg grid-cols-5">
+        <div className="mx-auto grid max-w-lg grid-cols-6">
           {NAV.map(([id, e, l]) => (
             <button key={id} onClick={() => { setTab(id); window.scrollTo({ top: 0 }); }} className={'flex flex-col items-center gap-0.5 py-2.5 transition ' + (tab === id ? 'text-gold' : 'text-stone-500')}>
               <span className={'text-2xl transition ' + (tab === id ? 'scale-110' : 'opacity-70 grayscale')}>{e}</span>
@@ -3303,6 +3308,348 @@ function SettingsPage({ app, onBack }) {
       <button onClick={onBack} className="mb-3 flex items-center gap-2 text-sm text-stone-400">← Zurück</button>
       <AreaTitle icon="⚙️" title="Einstellungen" />
       <div className="mt-3"><SettingsPanel app={app} /></div>
+    </div>
+  );
+}
+
+/* =====================================================================
+   VOLLBILD-START, SCHNELLAKTIONEN, PLAN-KALENDER, SCHWIERIGKEIT
+   ===================================================================== */
+
+const DAY_SHORT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const fmtKg = v => String(Math.round(v * 10) / 10).replace('.', ',');
+const shortDate = k => k.slice(8, 10) + '.' + k.slice(5, 7) + '.';
+
+/* ---------- Schwierigkeit aus Feedback ---------- */
+const scaleWork = (w, adj) => w <= 30 ? w : clamp(w + adj * 15, 45, 300);
+const scaleRest = (r, adj) => r <= 15 ? r : clamp(r - adj * 10, 20, 120);
+function applyFeedback(st, v) {
+  const adj = clamp((st.path.adjust || 0) + v, -2, 3);
+  const order = ['leicht', 'mittel', 'hart'];
+  let inten = st.settings.intensity || 'mittel';
+  let i = order.indexOf(inten);
+  if (v > 0 && adj >= 2 && i < 2) i++;
+  if (v < 0 && adj <= -1 && i > 0) i--;
+  inten = order[i];
+  return { st: { ...st, path: { ...st.path, adjust: adj }, settings: { ...st.settings, intensity: inten } }, adj, inten, changedInt: inten !== st.settings.intensity };
+}
+function feedbackMsg(v, adj, inten, changedInt) {
+  if (v === 0) return '👍 Passt – das Niveau bleibt so.';
+  const r = adj > 0 ? '+' + adj + ' Runde' + (adj > 1 ? 'n' : '') : adj < 0 ? adj + ' Runde' + (adj < -1 ? 'n' : '') : 'normale Rundenzahl';
+  const t = adj !== 0 ? ', Runden ' + (adj > 0 ? Math.abs(adj) * 15 + ' Sek. länger' : Math.abs(adj) * 15 + ' Sek. kürzer') : '';
+  return (v > 0 ? '💪 Nächstes Mal härter: ' : '😌 Nächstes Mal leichter: ') + r + t + (changedInt ? ', Coach «' + inten + '»' : '') + '.';
+}
+
+/* ---------- Planung ---------- */
+function planDays(state, from, count) {
+  const days = (state.plan && state.plan.days) || [1, 3, 5];
+  const done = state.path.done;
+  let idx = LESSONS.findIndex(l => !done.includes(l.id));
+  const t = todayKey();
+  const res = {};
+  for (let i = 0; i < count; i++) {
+    const k = addDays(from, i);
+    const wd = weekdayIdx(keyToDate(k));
+    const isTrain = days.includes(wd);
+    if (k < t) {
+      const L = state.log.filter(l => l.d === k);
+      res[k] = L.length ? { type: 'past', items: L } : { type: 'none', train: isTrain };
+      continue;
+    }
+    if (k === t && getDay(state, k).workout) { res[k] = { type: 'done', items: state.log.filter(l => l.d === k), train: isTrain }; continue; }
+    if (isTrain) {
+      if (idx >= 0 && idx < LESSONS.length) { res[k] = { type: 'lesson', lesson: LESSONS[idx], train: true }; idx++; }
+      else res[k] = { type: 'camp', train: true };
+    } else {
+      const prevTrain = days.includes(wd === 1 ? 7 : wd - 1);
+      res[k] = prevTrain ? { type: 'regen', train: false } : { type: 'free', train: false };
+    }
+  }
+  return res;
+}
+function weighTarget(state, k) {
+  const W = [...state.weights].sort((a, b) => a.d < b.d ? -1 : 1);
+  if (!W.length || state.profile.age < 18) return null;
+  const first = W[0];
+  const weeks = Math.max(0, (keyToDate(k) - keyToDate(first.d)) / (7 * 864e5));
+  const rate = state.profile.goal === 'cut' ? -0.006 : state.profile.goal === 'aufbau' ? 0.0025 : 0;
+  return rate === 0 ? first.kg : first.kg * Math.pow(1 + rate, weeks);
+}
+function mealsFor(d, k, isTrain) {
+  const n = d.n, rest = !isTrain, wd = weekdayIdx(keyToDate(k));
+  const T = { p: n.prot, f: n.fat, c: rest ? Math.round(n.carbs * 0.75) : n.carbs };
+  return MEALS_PLAN.map((m, i) => {
+    const v = m.variants[(wd + i) % 3];
+    const share = rest && m.id === 'snack' ? { p: 0.1, c: 0.12, f: 0.08 } : m.share;
+    const r = solveMeal(v, { p: T.p * share.p, c: T.c * share.c, f: T.f * share.f });
+    return { m, v, ...r, title: rest && m.restTitle ? m.restTitle : m.title };
+  });
+}
+
+function DayMeals({ app, k, isTrain }) {
+  const { d } = app;
+  const [open, setOpen] = useState(null);
+  const meals = mealsFor(d, k, isTrain);
+  const kcal = Math.round(meals.reduce((a, x) => a + x.tot.kcal, 0));
+  return (
+    <div>
+      <div className="mb-2 text-xs text-stone-500">{isTrain ? '🥊 Trainingstag' : '😌 Ruhetag'} · ≈ {kcal} kcal</div>
+      <div className="space-y-1.5">
+        {meals.map((x, i) => (
+          <div key={x.m.id} className="rounded-xl bg-coal">
+            <button onClick={() => setOpen(open === i ? null : i)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
+              <span className="flex-1"><span className="block text-[10px] uppercase tracking-wider text-blood">{x.title}</span><span className="block text-sm text-stone-100">{x.v.name}</span></span>
+              <span className="text-xs text-stone-500">{Math.round(x.tot.kcal)} kcal</span>
+              <span className="text-stone-500">{open === i ? '▾' : '▸'}</span>
+            </button>
+            {open === i && (
+              <ul className="space-y-1 px-3 pb-3">
+                {x.v.items.map(([fk]) => <li key={fk} className="flex justify-between gap-3 text-xs"><span className="text-stone-400">{FOODS[fk].n}</span><span className="shrink-0 text-stone-100">{fmtAmount(fk, x.g[fk])}</span></li>)}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Bottom-Sheet ---------- */
+function Sheet({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 sm:items-center" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/10 bg-anth p-5 sm:rounded-3xl" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }}>
+        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-white/20"></div>
+        <div className="mb-3 flex items-center justify-between"><h3 className="font-display text-2xl uppercase text-stone-50">{title}</h3><button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10" aria-label="Schliessen">✕</button></div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SleepPicker({ app, onDone }) {
+  const { today, updateToday, state } = app;
+  return (
+    <div>
+      <p className="mb-3 text-sm text-stone-400">Wie viele Stunden hast du letzte Nacht geschlafen?</p>
+      <div className="grid grid-cols-4 gap-2">
+        {[5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(h => (
+          <button key={h} onClick={() => { updateToday(r => ({ ...r, sleep: h })); onDone && onDone(); }} className={'rounded-xl border py-3 text-sm ' + (today.sleep === h ? 'border-gold bg-gold text-ink' : 'border-white/10 bg-coal text-stone-200')}>{String(h).replace('.', ',')} h</button>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-stone-500">Ziel: ab {state.goals.sleepH || 7} Stunden.</p>
+    </div>
+  );
+}
+
+/* ---------- Vollbild-Start ---------- */
+function StartScreen({ app }) {
+  const { state, update, d, today, tKey, updateToday, go, openLesson, startRegen, toast, claimReward } = app;
+  const [sheet, setSheet] = useState(null);
+  const [reward, setReward] = useState(null);
+  const fref = useRef(null);
+  const plan = planDays(state, tKey, 1)[tKey];
+  const nextL = LESSONS.find(l => !state.path.done.includes(l.id));
+  const G = state.goals;
+  const goals = [
+    ...(G.train ? [{ id: 'train', icon: '🥊', label: 'Training', done: today.workout }] : []),
+    ...(G.water ? [{ id: 'water', icon: '💧', label: 'Trinken', done: today.water >= d.n.glasses }] : []),
+    ...(G.food ? [{ id: 'food', icon: '🥦', label: 'Gesund essen', done: NUT_ITEMS.every(i => today.nut[i.id]) }] : []),
+    ...(G.sleep ? [{ id: 'sleep', icon: '😴', label: 'Schlafen', done: today.sleep != null }] : []),
+    ...G.custom.map(c => ({ id: c.id, icon: c.emoji, label: c.label, done: !!(today.custom || {})[c.id], custom: true })),
+  ];
+  const doneN = goals.filter(g => g.done).length, allDone = goals.length > 0 && doneN === goals.length;
+  const W = [...state.weights].sort((a, b) => a.d < b.d ? -1 : 1);
+  const lastW = W[W.length - 1];
+  const nutN = NUT_ITEMS.filter(i => today.nut[i.id]).length;
+
+  const session = plan.type === 'lesson' ? { title: 'Heutige Session starten', sub: 'Lektion ' + (lessonIndex(plan.lesson.id) + 1) + ': ' + plan.lesson.title + ' · ca. ' + estMinutes(resolveSteps(plan.lesson.steps, state.equip), state.path.adjust || 0) + ' Min.', act: () => openLesson(plan.lesson) }
+    : plan.type === 'regen' ? { title: 'Heutige Session: Erholung', sub: '10 Min. locker bewegen', act: startRegen }
+      : plan.type === 'camp' ? { title: 'Heutige Session starten', sub: 'Fight Camp: Klassische Runden', act: () => openLesson({ ...LIB.find(w => w.id === 'w_classic'), kind: 'workout', learns: [] }) }
+        : plan.type === 'done' ? { title: '✓ Heute erledigt', sub: 'Stark! Noch Lust auf ein Workout?', act: () => go('workouts'), done: true }
+          : { title: 'Heute ist frei 🛋', sub: nextL ? 'Trotzdem trainieren? Lektion ' + (lessonIndex(nextL.id) + 1) + ': ' + nextL.title : 'Trotzdem trainieren? Zu den Workouts', act: () => nextL ? openLesson(nextL) : go('workouts'), free: true };
+
+  const QUICK = [
+    { icon: '💧', label: 'Trinken', sub: (today.water * 0.25).toFixed(2).replace(/\.?0+$/, '').replace('.', ',') + ' / ' + fmtKg(d.n.liters) + ' l', done: today.water >= d.n.glasses, act: () => { updateToday(r => ({ ...r, water: r.water + 1 })); toast('💧 +1 Glas (' + ((today.water + 1) * 0.25).toFixed(2).replace('.', ',') + ' l)'); } },
+    { icon: '⚖️', label: 'Gewicht', sub: lastW && lastW.d === tKey ? fmtKg(lastW.kg) + ' kg ✓' : 'eintragen', done: lastW && lastW.d === tKey, act: () => setSheet('weight') },
+    { icon: '😴', label: 'Schlaf', sub: today.sleep != null ? String(today.sleep).replace('.', ',') + ' h' : 'eintragen', done: today.sleep != null, act: () => setSheet('sleep') },
+    { icon: '🥦', label: 'Essen', sub: nutN + ' / 5', done: nutN === 5, act: () => setSheet('food') },
+    { icon: '📅', label: 'Plan', sub: 'Woche', act: () => go('plan') },
+  ];
+
+  return (
+    <div className="relative -mx-4 -mt-4 overflow-hidden" style={{ height: 'calc(100dvh - 68px - env(safe-area-inset-bottom))', minHeight: 560 }}>
+      {state.heroImg ? <img src={state.heroImg} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: 'center 25%' }} /> : <RingScene lefty={state.profile.hand === 'l'} />}
+      <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(10,10,10,0.85) 0%, rgba(10,10,10,0) 20%, rgba(10,10,10,0) 42%, rgba(10,10,10,0.9) 72%, rgba(10,10,10,1) 100%)' }}></div>
+
+      {/* Kopfzeile */}
+      <div className="absolute inset-x-0 top-0 px-4 pt-4">
+        <div className="flex items-center justify-between">
+          <div className="font-display text-xl uppercase leading-none tracking-[0.12em] text-stone-100">Fight<span className="text-blood">·</span><span className="text-gold">Camp</span></div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => fref.current && fref.current.click()} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-ink/60 backdrop-blur" aria-label="Startbild ändern">📷</button>
+            <button onClick={() => go('trophy')} className="rounded-full border border-gold/40 bg-ink/60 px-3 py-1.5 text-xs text-gold backdrop-blur">{d.rank.name}</button>
+            <button onClick={() => go('settings')} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-ink/60 backdrop-blur" aria-label="Einstellungen">⚙️</button>
+          </div>
+        </div>
+        <div className="mt-4 flex items-end justify-between">
+          <div>
+            <div className="text-xs text-stone-300">{new Date().getHours() < 11 ? 'Guten Morgen' : new Date().getHours() < 18 ? 'Hallo' : 'Guten Abend'},</div>
+            <div className="font-display text-3xl uppercase leading-none text-white" style={{ textShadow: '0 2px 10px #000' }}>{state.profile.name || 'Champion'}</div>
+          </div>
+          <div className="text-right"><div className="font-display text-2xl leading-none text-white" style={{ textShadow: '0 2px 10px #000' }}>{d.streak}🔥</div><div className="text-[9px] uppercase tracking-wider text-stone-300">Tage am Stück</div></div>
+        </div>
+      </div>
+      <input ref={fref} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files && e.target.files[0]; if (f) loadPhoto(f, url => { update(s => ({ ...s, heroImg: url })); toast('Startbild gespeichert – nur auf diesem iPhone'); }, () => toast('Bild konnte nicht geladen werden')); e.target.value = ''; }} />
+
+      {/* Unterer Bereich */}
+      <div className="absolute inset-x-0 bottom-0 px-4 pb-4">
+        <div className="mb-2.5 flex items-center gap-2">
+          <button onClick={() => setSheet('goals')} className="flex items-center gap-2 rounded-full border border-white/15 bg-ink/70 px-3 py-1.5 text-xs text-stone-200 backdrop-blur">
+            🎯 Ziele heute <span className={doneN === goals.length ? 'text-gold' : 'text-stone-400'}>{doneN}/{goals.length}</span>
+          </button>
+          {allDone && !today.claimed && <button onClick={() => { const r = claimReward(); setReward(r || 'xp'); setSheet('reward'); }} className="animate-pulse rounded-full bg-gold px-3 py-1.5 text-xs font-medium text-ink">🎁 Belohnung abholen</button>}
+          {today.claimed && <span className="text-xs text-stone-500">🎁 abgeholt</span>}
+        </div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {QUICK.map(q => (
+            <button key={q.label} onClick={q.act} className={'relative rounded-2xl border px-1 py-2 text-center backdrop-blur-md transition active:scale-95 ' + (q.done ? 'border-gold/60 bg-gold/15' : 'border-white/15 bg-ink/70')}>
+              {q.done && <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[9px] text-ink">✓</span>}
+              <div className="text-2xl leading-none">{q.icon}</div>
+              <div className="mt-1 text-[11px] font-medium text-stone-100">{q.label}</div>
+              <div className="text-[9px] leading-tight text-stone-400">{q.sub}</div>
+            </button>
+          ))}
+        </div>
+        <button onClick={session.act} className={'mt-3 w-full rounded-2xl px-4 py-4 text-left shadow-xl transition active:scale-[0.98] ' + (session.done ? 'border border-gold/50 bg-ink/80 backdrop-blur' : session.free ? 'border border-white/20 bg-ink/80 backdrop-blur' : 'bg-blood')}>
+          <div className="flex items-center gap-3">
+            <span className={'flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xl ' + (session.done ? 'bg-gold/20 text-gold' : session.free ? 'bg-white/10' : 'bg-white/20 text-white')}>{session.done ? '✓' : session.free ? '🛋' : '▶'}</span>
+            <span className="flex-1">
+              <span className={'block font-display text-xl uppercase leading-tight ' + (session.done ? 'text-gold' : 'text-white')}>{session.title}</span>
+              <span className="block text-xs text-white/75">{session.sub}</span>
+            </span>
+          </div>
+        </button>
+      </div>
+
+      {sheet === 'weight' && <Sheet title="Gewicht" onClose={() => setSheet(null)}><WeightCard app={app} /></Sheet>}
+      {sheet === 'sleep' && <Sheet title="Schlaf" onClose={() => setSheet(null)}><SleepPicker app={app} onDone={() => { setSheet(null); toast('😴 Schlaf eingetragen'); }} /></Sheet>}
+      {sheet === 'food' && (
+        <Sheet title="Essen heute" onClose={() => setSheet(null)}>
+          <DayMeals app={app} k={tKey} isTrain={!!plan.train || plan.type === 'done'} />
+          <div className="mt-4 mb-2 text-xs uppercase tracking-wider text-stone-500">Gesund-essen-Checkliste</div>
+          <div className="space-y-2">{NUT_ITEMS.map(i => <Check key={i.id} checked={!!today.nut[i.id]} label={i.label} sub={i.sub} xp={4} onChange={() => updateToday(r => ({ ...r, nut: { ...r.nut, [i.id]: !r.nut[i.id] } }))} />)}</div>
+        </Sheet>
+      )}
+      {sheet === 'goals' && (
+        <Sheet title="Ziele heute" onClose={() => setSheet(null)}>
+          <div className="space-y-2">
+            {goals.map(g => (
+              <Check key={g.id} checked={g.done} label={g.icon + ' ' + g.label} onChange={() => {
+                if (g.custom) updateToday(r => ({ ...r, custom: { ...(r.custom || {}), [g.id]: !(r.custom || {})[g.id] } }));
+                else if (g.id === 'water') updateToday(r => ({ ...r, water: r.water + 1 }));
+                else if (g.id === 'sleep') setSheet('sleep');
+                else if (g.id === 'food') setSheet('food');
+                else if (g.id === 'train') { setSheet(null); session.act(); }
+              }} />
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-stone-500">Alle Ziele geschafft = Tagesbelohnung + 25 XP.</p>
+          <div className="mt-3"><BigBtn kind="ghost" onClick={() => setSheet('editgoals')}>✏️ Ziele anpassen</BigBtn></div>
+        </Sheet>
+      )}
+      {sheet === 'editgoals' && <GoalsEditor app={app} onClose={() => setSheet(null)} />}
+      {sheet === 'reward' && (
+        <Sheet title="Tagesbelohnung" onClose={() => setSheet(null)}>
+          {reward && reward !== 'xp' ? <RewardCard r={reward} /> : <p className="text-stone-300">+25 XP – du hast alle Belohnungen gesammelt!</p>}
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Plan-Kalender ---------- */
+function PlanTab({ app }) {
+  const { state, update, d, tKey, openLesson, startRegen, go } = app;
+  const [wOff, setWOff] = useState(0);
+  const [sel, setSel] = useState(tKey);
+  const [weighOpen, setWeighOpen] = useState(false);
+  const days = (state.plan && state.plan.days) || [1, 3, 5];
+  const start = addDays(weekStart(tKey), wOff * 7);
+  const horizonFrom = start < tKey ? start : tKey;
+  const span = Math.max(7, Math.round((keyToDate(addDays(start, 7)) - keyToDate(horizonFrom)) / 864e5));
+  const plan = planDays(state, horizonFrom, span + 1);
+  const toggleDay = wd => update(s => {
+    const cur = (s.plan && s.plan.days) || [1, 3, 5];
+    const nd = cur.includes(wd) ? cur.filter(x => x !== wd) : [...cur, wd].sort();
+    return nd.length ? { ...s, plan: { ...(s.plan || {}), days: nd } } : s;
+  });
+  const p = plan[sel] || { type: 'none' };
+  const isTrain = p.type === 'lesson' || p.type === 'camp' || p.type === 'done' || p.type === 'past' || !!p.train;
+  const wEntry = state.weights.find(w => w.d === sel);
+  const target = weighTarget(state, sel);
+  const weighDay = weekdayIdx(keyToDate(sel)) === 1;
+  const icon = q => !q ? '' : q.type === 'lesson' ? '🥊' : q.type === 'camp' ? '🔔' : q.type === 'regen' ? '😌' : q.type === 'done' || q.type === 'past' ? '✅' : q.type === 'none' && q.train ? '✖️' : '·';
+  const label = q => q.type === 'lesson' ? 'Lektion ' + (lessonIndex(q.lesson.id) + 1) + ': ' + q.lesson.title : q.type === 'camp' ? 'Fight Camp: Klassische Runden' : q.type === 'regen' ? 'Erholung (10 Min., freiwillig)' : q.type === 'free' ? 'Frei – Pause machen' : q.type === 'done' || q.type === 'past' ? q.items.map(x => x.title).join(', ') || 'Trainiert' : q.train ? 'Training verpasst' : 'Frei';
+  return (
+    <div className="space-y-4">
+      <AreaTitle icon="📅" title="Plan" sub="Training, Essen und Gewicht für jeden Tag" />
+      <Card>
+        <div className="mb-2 flex items-end justify-between"><div className="text-xs uppercase tracking-wider text-stone-500">Deine Trainingstage</div><div className="text-[11px] text-stone-500">{days.length}× pro Woche</div></div>
+        <div className="grid grid-cols-7 gap-1">
+          {DAY_SHORT.map((n, i) => <button key={n} onClick={() => toggleDay(i + 1)} className={'rounded-lg border py-2 text-xs ' + (days.includes(i + 1) ? 'border-gold bg-gold/20 text-gold' : 'border-white/10 text-stone-500')}>{n}</button>)}
+        </div>
+        <p className="mt-2 text-[11px] text-stone-500">Für Anfänger: 3 Tage mit Pause dazwischen. Am Tag danach ist eine kurze Erholung eingeplant.</p>
+      </Card>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <button onClick={() => setWOff(w => w - 1)} className="h-9 w-9 rounded-lg bg-white/10">‹</button>
+          <div className="text-sm text-stone-200">{shortDate(start)} – {shortDate(addDays(start, 6))}{wOff === 0 ? ' · diese Woche' : ''}</div>
+          <button onClick={() => setWOff(w => Math.min(w + 1, 8))} className="h-9 w-9 rounded-lg bg-white/10">›</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: 7 }).map((_, i) => {
+            const k = addDays(start, i), q = plan[k], isSel = k === sel, isToday = k === tKey;
+            const hasW = state.weights.some(w => w.d === k);
+            return (
+              <button key={k} onClick={() => setSel(k)} className={'flex flex-col items-center rounded-xl border py-2 transition ' + (isSel ? 'border-gold bg-gold/15' : 'border-white/10 bg-anth') + (isToday ? ' ring-2 ring-blood' : '')}>
+                <span className="text-[10px] uppercase text-stone-500">{DAY_SHORT[i]}</span>
+                <span className={'font-display text-lg leading-tight ' + (isSel ? 'text-gold' : 'text-stone-100')}>{+k.slice(8, 10)}</span>
+                <span className="text-sm leading-none">{icon(q)}</span>
+                <span className="mt-0.5 h-1.5 w-1.5 rounded-full" style={{ background: hasW ? GOLD : 'transparent' }}></span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="font-display text-xl uppercase text-stone-100">{keyToDate(sel).toLocaleDateString('de-CH', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+
+      <Card>
+        <div className="mb-2 text-xs uppercase tracking-wider text-stone-500">🥊 Training</div>
+        <div className="text-base text-stone-100">{label(p)}</div>
+        {sel === tKey && p.type === 'lesson' && <div className="mt-3"><BigBtn onClick={() => openLesson(p.lesson)}>▶ Jetzt starten</BigBtn></div>}
+        {sel === tKey && p.type === 'regen' && <div className="mt-3"><BigBtn kind="gold" onClick={startRegen}>▶ Erholung starten</BigBtn></div>}
+        {sel === tKey && p.type === 'camp' && <div className="mt-3"><BigBtn onClick={() => openLesson({ ...LIB.find(w => w.id === 'w_classic'), kind: 'workout', learns: [] })}>▶ Jetzt starten</BigBtn></div>}
+        {sel > tKey && p.type === 'lesson' && <p className="mt-1 text-xs text-stone-500">Ca. {estMinutes(resolveSteps(p.lesson.steps, state.equip), state.path.adjust || 0)} Min. · {p.lesson.goal}</p>}
+      </Card>
+
+      <Card>
+        <div className="mb-2 text-xs uppercase tracking-wider text-stone-500">🥦 Mahlzeiten</div>
+        <DayMeals key={sel} app={app} k={sel} isTrain={isTrain} />
+        <button onClick={() => go('food')} className="mt-3 text-xs text-stone-400">Essensplan anpassen (Gewicht, Ziel) ›</button>
+      </Card>
+
+      <Card>
+        <div className="mb-2 text-xs uppercase tracking-wider text-stone-500">⚖️ Gewicht</div>
+        {wEntry ? <div className="text-base text-stone-100">{fmtKg(wEntry.kg)} kg eingetragen ✓</div>
+          : sel <= tKey ? <div className="text-sm text-stone-400">{weighDay ? 'Wiegetag' : 'Kein Eintrag'}{sel === tKey ? '' : ''}</div>
+            : <div className="text-sm text-stone-400">{weighDay ? 'Wiegetag (montags)' : 'Kein Wiegetag'}</div>}
+        {target && weighDay && !wEntry && sel >= tKey && <div className="mt-1 text-xs text-stone-500">Richtwert laut deinem Ziel: ≈ {fmtKg(target)} kg</div>}
+        {sel === tKey && !wEntry && <div className="mt-3"><BigBtn kind="ghost" onClick={() => setWeighOpen(true)}>Gewicht eintragen</BigBtn></div>}
+      </Card>
+      {weighOpen && <Sheet title="Gewicht" onClose={() => setWeighOpen(false)}><WeightCard app={app} /></Sheet>}
     </div>
   );
 }
