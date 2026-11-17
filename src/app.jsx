@@ -69,9 +69,9 @@ function allDeVoices() {
   } catch (e) { return []; }
 }
 function deVoice() {
+  if (!VOICE_PREF.name) return null;
   const vs = allDeVoices();
-  if (VOICE_PREF.name) { const m = vs.find(v => v.name === VOICE_PREF.name); if (m) return m; }
-  return vs.find(v => v.lang.toLowerCase().replace('_', '-') === 'de-de') || vs[0] || null;
+  return vs.find(v => v.name === VOICE_PREF.name) || null;
 }
 function speak(text, rate = 1.15, interrupt = true) {
   try {
@@ -2158,7 +2158,7 @@ function VoicePicker({ st, setSt }) {
     try { window.speechSynthesis && window.speechSynthesis.addEventListener('voiceschanged', load); } catch (e) { }
     return () => { clearInterval(iv); clearTimeout(to); try { window.speechSynthesis.removeEventListener('voiceschanged', load); } catch (e) { } };
   }, []);
-  const current = (deVoice() || {}).name;
+  const current = st.voiceName;
   const label = v => {
     const reg = { 'de-de': 'Deutschland', 'de-ch': 'Schweiz', 'de-at': 'Österreich' }[v.lang.toLowerCase().replace('_', '-')] || v.lang;
     const q = /premium/i.test(v.name) ? ' · Premium' : /enhanced|erweitert/i.test(v.name) ? ' · Erweitert' : '';
@@ -2168,8 +2168,15 @@ function VoicePicker({ st, setSt }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wider text-stone-500">Stimme wählen ({voices.length})</div>
-      {voices.length === 0 ? <p className="mt-2 text-sm text-stone-400">Keine deutsche Stimme gefunden. Tippe auf «Testen» und versuch es danach nochmal.</p> : (
-        <div className="mt-2 space-y-1.5">
+      <div className="mt-2 space-y-1.5">
+        <button onClick={() => { setSt({ voiceName: null }); VOICE_PREF.name = null; ac(); speak('Hallo! Ich bin dein Box-Coach. Eins, zwei, Hände hoch!', st.rate); }} className={'flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ' + (!st.voiceName ? 'border-gold bg-gold/15' : 'border-white/10 bg-coal')}>
+          <span className="text-lg">{!st.voiceName ? '🔊' : '📱'}</span>
+          <span className="flex-1"><span className={'block text-sm ' + (!st.voiceName ? 'text-gold' : 'text-stone-100')}>iPhone-Standard</span><span className="block text-[11px] text-stone-500">Das iPhone wählt die Stimme selbst</span></span>
+          <span className="text-xs text-stone-500">{!st.voiceName ? 'aktiv' : 'anhören'}</span>
+        </button>
+      </div>
+      {voices.length === 0 ? <p className="mt-2 text-sm text-stone-400">Keine weiteren deutschen Stimmen gefunden.</p> : (
+        <div className="mt-1.5 space-y-1.5">
           {voices.map(v => { const l = label(v), on = current === v.name; return (
             <button key={v.name + v.lang} onClick={() => pickAndTest(v)} className={'flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ' + (on ? 'border-gold bg-gold/15' : 'border-white/10 bg-coal')}>
               <span className="text-lg">{on ? '🔊' : '🗣️'}</span>
@@ -2180,7 +2187,7 @@ function VoicePicker({ st, setSt }) {
         </div>
       )}
       <div className="mt-2"><Btn kind="ghost" onClick={() => { ac(); speak('Eins, zwei! Hände hoch!', st.rate); }}>🔊 Testen</Btn></div>
-      <p className="mt-2 text-xs text-stone-500">Mehr und bessere Stimmen (z. B. «Premium»): iPhone-Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen → Deutsch. Dort eine Stimme laden, dann die App neu öffnen.</p>
+      <p className="mt-2 text-xs text-stone-500">Tipp: Wähle «iPhone-Standard» und stell in den iPhone-Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen → Deutsch deine Lieblingsstimme ein (Häkchen setzen). Apple gibt heruntergeladene Stimmen nicht an Web-Apps weiter – ob iOS sie trotzdem nimmt, hängt von der iOS-Version ab.</p>
     </div>
   );
 }
