@@ -774,21 +774,22 @@ function PlanPanel({ app, focusWarmup }) {
 }
 
 /* ---------- Nutrition & Recovery ---------- */
-function FoodPanel({ app }) {
+function FoodPanel({ app, section = 'food' }) {
   const { state, update, today, updateToday, d } = app;
   const p = state.profile, n = d.n;
   const setP = patch => update(s => ({ ...s, profile: { ...s.profile, ...patch } }));
   const glasses = n.glasses;
   return (
     <div className="space-y-4">
-      <NutritionPlan app={app} />
-      <Card>
+      {section === 'food' && <NutritionPlan app={app} />}
+      {section === 'food' && <Card>
         <H2 sub={'Heute · ' + NUT_ITEMS.filter(i => today.nut[i.id]).length + ' von ' + NUT_ITEMS.length + ' geschafft'}>Gesund essen</H2>
         <div className="space-y-2">
           {NUT_ITEMS.map(i => <Check key={i.id} checked={!!today.nut[i.id]} label={i.label} sub={i.sub} xp={4} onChange={() => updateToday(r => ({ ...r, nut: { ...r.nut, [i.id]: !r.nut[i.id] } }))} />)}
         </div>
-      </Card>
+      </Card>}
 
+      {section === 'drink' && <>
       <Card>
         <H2 sub={'Ziel: ' + n.liters + ' l (' + glasses + ' Gläser à 2,5 dl)'}>Wasser trinken</H2>
         <div className="flex flex-wrap gap-1.5">
@@ -820,6 +821,7 @@ function FoodPanel({ app }) {
           {['Nach harten Tagen: 10 Min. lockeres Auslaufen oder Schattenboxen statt sofort hinsetzen.', 'Handgelenke & Knöchel nach dem Training checken: Schwellung oder stechender Schmerz = Pause und abklären lassen.', 'Muskelkater ist normal, Gelenkschmerz nicht.', 'Mindestens 1 Tag pro Woche komplett ohne Sandsack.', 'Stress und Schlaf zählen zur Belastung – an schlechten Tagen auf Einsteiger-Umfang reduzieren.'].map(x => <li key={x} className="flex gap-2"><span className="text-gold">◆</span><span>{x}</span></li>)}
         </ul>
       </Card>
+      </>}
     </div>
   );
 }
@@ -1991,7 +1993,7 @@ function Home({ app }) {
     { id: 'train', icon: '🥊', label: 'Training', done: today.workout, act: () => nextL ? openLesson(nextL) : go('more', 'camp') },
     { id: 'water', icon: '💧', label: 'Trinken', done: today.water >= d.n.glasses, sub: (today.water * 0.25).toFixed(1) + ' / ' + d.n.liters + ' l', act: () => updateToday(r => ({ ...r, water: r.water + 1 })) },
     { id: 'food', icon: '🥦', label: 'Gesund essen', done: NUT_ITEMS.every(i => today.nut[i.id]), sub: NUT_ITEMS.filter(i => today.nut[i.id]).length + ' / 5', act: () => go('more', 'food') },
-    { id: 'sleep', icon: '😴', label: 'Schlafen', done: today.sleep != null, sub: today.sleep != null ? today.sleep + ' h' : 'eintragen', act: () => go('more', 'food') },
+    { id: 'sleep', icon: '😴', label: 'Schlafen', done: today.sleep != null, sub: today.sleep != null ? today.sleep + ' h' : 'eintragen', act: () => go('drink') },
   ];
   const goals = [
     ...allGoals.filter(g => G[g.id]),
@@ -2003,17 +2005,8 @@ function Home({ app }) {
   const greet = hour < 11 ? 'Guten Morgen' : hour < 18 ? 'Hallo' : 'Guten Abend';
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm text-stone-400">{greet}{name ? ',' : ''}</div>
-          <div className="font-display text-3xl uppercase leading-tight text-stone-50">{name || 'Champion'} 👋</div>
-        </div>
-        <div className="text-center">
-          <div className="font-display text-3xl leading-none text-stone-50">{d.streak}<span className="text-2xl">🔥</span></div>
-          <div className="text-[10px] uppercase tracking-wider text-stone-500">Tage am Stück</div>
-        </div>
-      </div>
+    <div className="-mt-4 space-y-5">
+      <StartScene app={app} />
 
       {/* Hero */}
       {today.workout ? (
@@ -2085,8 +2078,7 @@ function Home({ app }) {
 
       <HomeExtras app={app} />
 
-      {/* Lernpfad */}
-      <PathView app={app} />
+
     </div>
   );
 }
@@ -2125,7 +2117,7 @@ function PathView({ app }) {
 }
 
 /* ---------- Lernen ---------- */
-function LearnTab({ app }) {
+function LearnTab({ app, part = 'tech' }) {
   const { state } = app;
   const lefty = state.profile.hand === 'l';
   const known = state.path.done.length ? knownUpTo(Math.max(...state.path.done.map(lessonIndex))) : [];
@@ -2133,12 +2125,9 @@ function LearnTab({ app }) {
   const T = open ? TECH[open] : null;
   return (
     <div className="space-y-5">
-      <div>
-        <div className="font-display text-2xl uppercase text-stone-50">Techniken</div>
-        <p className="text-sm text-stone-400">Tippe eine Technik an, um sie nochmal anzuschauen.</p>
-      </div>
-      <VideoCheck app={app} known={known} />
-      <div className="grid grid-cols-2 gap-2.5">
+      {part === 'tech' && <p className="text-sm text-stone-400">Tippe eine gelernte Technik an, um sie nochmal anzuschauen.</p>}
+      {part === 'video' && (known.length ? <VideoCheck app={app} known={known} /> : <p className="rounded-2xl bg-anth p-4 text-sm text-stone-400">Der Video-Check wird nach deiner ersten Lektion freigeschaltet.</p>)}
+      {part === 'tech' && <div className="grid grid-cols-2 gap-2.5">
         {TECH_ORDER.map(id => {
           const t = TECH[id], ok = known.includes(id);
           return (
@@ -2149,8 +2138,8 @@ function LearnTab({ app }) {
             </button>
           );
         })}
-      </div>
-      <GuidePanel app={app} />
+      </div>}
+      {part === 'schutz' && <GuidePanel app={app} />}
       {T && (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 sm:items-center" onClick={() => setOpen(null)}>
           <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-white/10 bg-anth p-5 sm:rounded-3xl" onClick={e => e.stopPropagation()}>
@@ -2361,12 +2350,15 @@ function BackupCard({ app }) {
 }
 
 /* ---------- App ---------- */
-const NAV = [['home', '🏠', 'Heute'], ['workouts', '🗂', 'Workouts'], ['learn', '📖', 'Lernen'], ['progress', '🏆', 'Erfolge'], ['more', '☰', 'Mehr']];
+const NAV = [['home', '🏠', 'Start'], ['training', '🥊', 'Training'], ['technik', '📖', 'Technik'], ['body', '🥦', 'Körper'], ['progress', '🏆', 'Fortschritt']];
+const ROUTES = { home: ['home'], today: ['home'], training: ['training'], lessons: ['training', 'lessons'], workouts: ['training', 'workouts'], timer: ['training', 'timer'], plan: ['training', 'camp'], camp: ['training', 'camp'], technik: ['technik'], learn: ['technik', 'tech'], tech: ['technik', 'tech'], video: ['technik', 'video'], combos: ['technik', 'combos'], guide: ['technik', 'schutz'], schutz: ['technik', 'schutz'], body: ['body'], food: ['body', 'food'], shop: ['body', 'shop'], drink: ['body', 'drink'], weight: ['body', 'weight'], progress: ['progress'], trophy: ['progress', 'trophies'], challenges: ['progress', 'challenges'], settings: ['settings'] };
 
 function App() {
   const [state, update, sync] = usePersistent();
   const [tab, setTab] = useState('home');
-  const [sub, setSub] = useState(null);
+  const [subs, setSubs] = useState({ training: 'lessons', technik: 'tech', body: 'food', progress: 'overview' });
+  const [prevTab, setPrevTab] = useState('home');
+  const setSub = (t, v) => setSubs(s => ({ ...s, [t]: v }));
   const [focusWarmup, setFocusWarmup] = useState(0);
   const [toasts, setToasts] = useState([]);
   const [tKey, setTKey] = useState(todayKey());
@@ -2386,14 +2378,15 @@ function App() {
   const toast = msg => { const id = Math.random(); setToasts(t => [...t, { id, msg }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000); };
   const updateToday = fn => update(s => ({ ...s, history: { ...s.history, [tKey]: fn(getDay(s, tKey)) } }));
   const go = (t, sb) => {
-    const map = { today: 'home', timer: 'more', plan: 'more', food: 'more', guide: 'learn', trophy: 'progress' };
-    const subMap = { timer: 'timer', plan: 'camp', food: 'food' };
-    const real = map[t] || t; setTab(real);
-    if (real === 'more') setSub(sb && sb !== 'warmup' ? sb : (subMap[t] || null));
-    if (sb === 'warmup') { setSub('camp'); setFocusWarmup(x => x + 1); }
+    let key = t === 'more' ? (sb || 'settings') : (sb && sb !== 'warmup' && ROUTES[sb] ? sb : t);
+    if (sb === 'warmup') key = 'camp';
+    const [tb, sbb] = ROUTES[key] || ['home'];
+    if (tb === 'settings') setPrevTab(tab);
+    setTab(tb); if (sbb) setSub(tb, sbb);
+    if (sb === 'warmup') setFocusWarmup(x => x + 1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const loadPreset = (p, label) => { setPreset({ ...p, label }); go('more', 'timer'); };
+  const loadPreset = (p, label) => { setPreset({ ...p, label }); go('timer'); };
   const claimReward = () => {
     const next = REWARDS.find(r => !state.unlocked.includes(r.id));
     update(s => ({ ...s, unlocked: next ? [...s.unlocked, next.id] : s.unlocked, history: { ...s.history, [tKey]: { ...getDay(s, tKey), claimed: true, rewardId: next ? next.id : null } } }));
@@ -2441,24 +2434,28 @@ function App() {
     <div className="mx-auto min-h-screen max-w-lg px-4 pb-28 pt-4">
       <header className="mb-4 flex items-center justify-between">
         <div className="font-display text-xl uppercase leading-none tracking-[0.12em] text-stone-100">Fight<span className="text-blood">·</span><span className="text-gold">Camp</span></div>
-        <button onClick={() => go('progress')} className="flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-3 py-1.5">
-          <span className="text-xs text-gold">{d.rank.name}</span>
-          <span className="h-1.5 w-12 overflow-hidden rounded-full bg-white/10"><span className="block h-full bg-gold" style={{ width: d.prog * 100 + '%' }}></span></span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => go('trophy')} className="flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-3 py-1.5">
+            <span className="text-xs text-gold">{d.rank.name}</span>
+            <span className="h-1.5 w-10 overflow-hidden rounded-full bg-white/10"><span className="block h-full bg-gold" style={{ width: d.prog * 100 + '%' }}></span></span>
+          </button>
+          <button onClick={() => go('settings')} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-anth text-lg" aria-label="Einstellungen">⚙️</button>
+        </div>
       </header>
 
       <div className={tab === 'home' ? '' : 'hidden'}><Home app={app} /></div>
-      <div className={tab === 'learn' ? '' : 'hidden'}><LearnTab app={app} /></div>
-      <div className={tab === 'progress' ? '' : 'hidden'}><ProgressTab app={app} /></div>
-      <div className={tab === 'workouts' ? '' : 'hidden'}><WorkoutsTab app={app} /></div>
-      <div className={tab === 'more' ? '' : 'hidden'}><MoreTab app={app} sub={sub} setSub={setSub} focusWarmup={focusWarmup} /></div>
+      <div className={tab === 'training' ? '' : 'hidden'}><TrainingTab app={app} sub={subs.training} setSub={v => setSub('training', v)} focusWarmup={focusWarmup} /></div>
+      {tab === 'technik' && <TechnikTab app={app} sub={subs.technik} setSub={v => setSub('technik', v)} />}
+      {tab === 'body' && <BodyTab app={app} sub={subs.body} setSub={v => setSub('body', v)} />}
+      {tab === 'progress' && <ProgressHub app={app} sub={subs.progress} setSub={v => setSub('progress', v)} />}
+      {tab === 'settings' && <SettingsPage app={app} onBack={() => { setTab(prevTab === 'settings' ? 'home' : prevTab); window.scrollTo({ top: 0 }); }} />}
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-ink/95 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto grid max-w-lg grid-cols-5">
           {NAV.map(([id, e, l]) => (
-            <button key={id} onClick={() => { setTab(id); if (id === 'more') setSub(null); window.scrollTo({ top: 0 }); }} className={'flex flex-col items-center gap-0.5 py-2.5 transition ' + (tab === id ? 'text-gold' : 'text-stone-500')}>
+            <button key={id} onClick={() => { setTab(id); window.scrollTo({ top: 0 }); }} className={'flex flex-col items-center gap-0.5 py-2.5 transition ' + (tab === id ? 'text-gold' : 'text-stone-500')}>
               <span className={'text-2xl transition ' + (tab === id ? 'scale-110' : 'opacity-70 grayscale')}>{e}</span>
-              <span className="text-[11px] font-medium">{l}</span>
+              <span className="text-[10px] font-medium">{l}</span>
             </button>
           ))}
         </div>
@@ -2617,10 +2614,7 @@ function WorkoutsTab({ app }) {
   const open = w => openLesson({ ...w, kind: 'workout', learns: [] });
   return (
     <div className="space-y-4">
-      <div>
-        <div className="font-display text-2xl uppercase text-stone-50">Workouts</div>
-        <p className="text-sm text-stone-400">Fertige Trainings zum Loslegen – zusätzlich zu deinen Lektionen.</p>
-      </div>
+      <p className="text-sm text-stone-400">Fertige Trainings zum Loslegen – zusätzlich zu deinen Lektionen.</p>
       <Card>
         <div className="mb-2 text-xs uppercase tracking-wider text-stone-500">Coach-Intensität</div>
         <IntensityPicker app={app} compact />
@@ -2847,7 +2841,7 @@ function WeightCard({ app }) {
 }
 
 /* ---------- Fortschritt (Kalender, Statistik, Rekorde) ---------- */
-function ProgressTab({ app }) {
+function ProgressTab({ app, part = 'overview' }) {
   const { state, d, tKey } = app;
   const [mOff, setMOff] = useState(0);
   const base = keyToDate(tKey); const first = new Date(base.getFullYear(), base.getMonth() + mOff, 1);
@@ -2862,7 +2856,10 @@ function ProgressTab({ app }) {
   const recent = [...state.log].sort((a, b) => b.t - a.t).slice(0, 6);
   return (
     <div className="space-y-4">
-      <div className="font-display text-2xl uppercase text-stone-50">Deine Erfolge</div>
+      {part === 'challenges' && <><ChallengesCard app={app} /><p className="px-1 text-xs text-stone-500">Jeden Montag gibt es 3 neue Challenges. Jede geschaffte Challenge bringt +50 XP.</p></>}
+      {part === 'trophies' && <TrophyPanel app={app} />}
+      {part === 'overview' && <>
+
       <div className="grid grid-cols-2 gap-2">
         {[['🥊', T.sessions, 'Trainings'], ['⏱', T.minutes, 'Minuten'], ['🔔', T.rounds, 'Runden'], ['💥', T.punches.toLocaleString('de-CH'), 'Schläge (geschätzt)']].map(([e, v, l]) => (
           <div key={l} className="rounded-2xl border border-white/10 bg-anth p-3">
@@ -2911,8 +2908,6 @@ function ProgressTab({ app }) {
         </div>
       </Card>
 
-      <ChallengesCard app={app} />
-      <WeightCard app={app} />
 
       {recent.length > 0 && (
         <Card>
@@ -2928,7 +2923,7 @@ function ProgressTab({ app }) {
           </div>
         </Card>
       )}
-      <TrophyPanel app={app} />
+      </>}
     </div>
   );
 }
@@ -3063,20 +3058,251 @@ function HomeExtras({ app }) {
   return (
     <div className="space-y-3">
       <ChallengesCard app={app} mini />
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => go('workouts')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
-          <div className="text-2xl">🗂</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Workouts</div><div className="text-[11px] text-stone-500">{LIB.length} fertige Trainings</div>
+      {needWeigh && (
+        <button onClick={() => go('weight')} className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-anth p-3 text-left">
+          <span className="text-2xl">⚖️</span><span className="flex-1"><span className="block text-sm text-stone-100">Zeit zum Wiegen</span><span className="block text-xs text-stone-500">Damit dein Essensplan zu dir passt</span></span><span className="text-stone-500">›</span>
         </button>
-        {needWeigh ? (
-          <button onClick={() => go('progress')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
-            <div className="text-2xl">⚖️</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Wiegen</div><div className="text-[11px] text-stone-500">Damit dein Essensplan passt</div>
-          </button>
-        ) : (
-          <button onClick={() => go('learn')} className="rounded-2xl border border-white/10 bg-anth p-3 text-left active:scale-[0.98]">
-            <div className="text-2xl">🎥</div><div className="mt-1 font-display text-sm uppercase text-stone-100">Video-Check</div><div className="text-[11px] text-stone-500">Technik überprüfen</div>
-          </button>
-        )}
+      )}
+    </div>
+  );
+}
+
+/* =====================================================================
+   NEUE STRUKTUR: Startbildschirm mit Ring-Szene, 4 Bereiche mit Unterreitern
+   ===================================================================== */
+
+function RingScene({ lefty }) {
+  const body = '#18181b', rim = 'rgba(212,175,55,0.55)';
+  return (
+    <svg viewBox="0 0 400 440" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden="true">
+      <defs>
+        <radialGradient id="rsSpot" cx="50%" cy="0%" r="90%">
+          <stop offset="0%" stopColor="#fff6dc" stopOpacity="0.28" />
+          <stop offset="55%" stopColor="#d4af37" stopOpacity="0.06" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="rsFloor" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2b1518" />
+          <stop offset="100%" stopColor="#0b0b0d" />
+        </linearGradient>
+        <radialGradient id="rsGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#d4af37" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#d4af37" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="rsGlove" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#e2343e" />
+          <stop offset="100%" stopColor="#7a0c12" />
+        </linearGradient>
+      </defs>
+      <rect width="400" height="440" fill="#070708" />
+      {/* Publikum / Hintergrund-Lichter */}
+      {Array.from({ length: 26 }).map((_, i) => <circle key={i} cx={(i * 61) % 400} cy={40 + ((i * 37) % 120)} r={i % 3 ? 1.2 : 2} fill="#d4af37" opacity={0.08 + (i % 4) * 0.04} />)}
+      <polygon points="200,-20 40,360 360,360" fill="url(#rsSpot)" />
+      {/* Ringboden */}
+      <polygon points="30,300 370,300 430,440 -30,440" fill="url(#rsFloor)" />
+      <ellipse cx="200" cy="352" rx="170" ry="36" fill="url(#rsGlow)" />
+      {/* Eckpfosten */}
+      <rect x="26" y="168" width="10" height="138" rx="3" fill="#b3121b" />
+      <rect x="364" y="168" width="10" height="138" rx="3" fill="#d4af37" />
+      {/* hintere Seile */}
+      {[188, 218, 248].map(y => <line key={y} x1="31" y1={y} x2="369" y2={y} stroke="#e7e3da" strokeOpacity="0.22" strokeWidth="2.5" />)}
+      {/* Boxer */}
+      <g transform={(lefty ? 'translate(400 0) scale(-1 1) ' : '') + 'translate(200 356) scale(0.84) translate(-200 -356)'}>
+        <ellipse cx="200" cy="356" rx="74" ry="10" fill="#000" opacity="0.65" />
+        <g>
+          <animateTransform attributeName="transform" type="translate" values="0 0;0 3;0 0" dur="1.6s" repeatCount="indefinite" />
+          {/* Beine */}
+          <path d="M178 290 L160 322 L150 350" fill="none" stroke={body} strokeWidth="24" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M222 290 L236 322 L244 350" fill="none" stroke={body} strokeWidth="24" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M178 290 L160 322 L150 350" fill="none" stroke={rim} strokeWidth="1.2" />
+          <ellipse cx="146" cy="353" rx="18" ry="8" fill="#0d0d0f" stroke="#e7e3da" strokeOpacity="0.5" />
+          <ellipse cx="249" cy="353" rx="18" ry="8" fill="#0d0d0f" stroke="#e7e3da" strokeOpacity="0.5" />
+          {/* Hose */}
+          <path d="M160 236 L240 236 L250 292 L208 300 L200 272 L192 300 L150 292 Z" fill="#b3121b" />
+          <rect x="159" y="232" width="82" height="10" rx="2" fill="#d4af37" />
+          {/* Oberkörper */}
+          <path d="M156 156 Q200 142 244 156 L238 236 Q200 246 162 236 Z" fill={body} stroke={rim} strokeWidth="1.4" />
+          <path d="M184 176 Q200 182 216 176 M200 182 L200 226" fill="none" stroke="#e7e3da" strokeOpacity="0.07" strokeWidth="2" />
+          <rect x="190" y="136" width="20" height="18" rx="5" fill={body} />
+          {/* Kopf */}
+          <ellipse cx="200" cy="116" rx="22" ry="26" fill={body} stroke={rim} strokeWidth="1.4" />
+          {/* Arme */}
+          <path d="M160 160 L146 206 L170 146" fill="none" stroke={body} strokeWidth="19" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M240 160 L256 202 L234 128" fill="none" stroke={body} strokeWidth="19" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M240 160 L256 202" fill="none" stroke={rim} strokeWidth="1.2" />
+          {/* Handschuhe */}
+          <g>
+            <animateTransform attributeName="transform" type="translate" values="0 0;0 0;-5 -10;0 0;0 0" keyTimes="0;0.6;0.68;0.76;1" dur="3.2s" repeatCount="indefinite" />
+            <ellipse cx="234" cy="122" rx="18" ry="21" fill="url(#rsGlove)" />
+            <ellipse cx="228" cy="113" rx="6" ry="8" fill="#fff" opacity="0.18" />
+            <rect x="222" y="138" width="24" height="9" rx="3" fill="#e7e3da" opacity="0.85" />
+          </g>
+          <ellipse cx="170" cy="136" rx="18" ry="21" fill="url(#rsGlove)" />
+          <ellipse cx="164" cy="127" rx="6" ry="8" fill="#fff" opacity="0.18" />
+          <rect x="158" y="152" width="24" height="9" rx="3" fill="#e7e3da" opacity="0.85" />
+        </g>
+      </g>
+      {/* vordere Seile */}
+      <line x1="-10" y1="318" x2="410" y2="318" stroke="#b3121b" strokeWidth="5" />
+      <line x1="-10" y1="350" x2="410" y2="350" stroke="#e7e3da" strokeOpacity="0.85" strokeWidth="5" />
+      <line x1="-10" y1="382" x2="410" y2="382" stroke="#b3121b" strokeWidth="5" />
+      <rect x="0" y="405" width="400" height="35" fill="#7a0c12" />
+      <text x="200" y="428" textAnchor="middle" fill="#d4af37" fontSize="15" fontFamily="Oswald, 'Avenir Next Condensed', sans-serif" letterSpacing="6">FIGHT · CAMP</text>
+    </svg>
+  );
+}
+
+function loadPhoto(file, cb, onErr) {
+  try {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1000, s = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); cb(c.toDataURL('image/jpeg', 0.72));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); onErr && onErr(); };
+    img.src = url;
+  } catch (e) { onErr && onErr(); }
+}
+
+function StartScene({ app }) {
+  const { state, update, d, go, toast } = app;
+  const fref = useRef(null);
+  const [menu, setMenu] = useState(false);
+  const lefty = state.profile.hand === 'l';
+  const nextL = LESSONS.find(l => !state.path.done.includes(l.id));
+  const knownN = state.path.done.length ? knownUpTo(Math.max(...state.path.done.map(lessonIndex))).filter(x => TECH[x]).length : 0;
+  const hour = new Date().getHours();
+  const greet = hour < 11 ? 'Guten Morgen' : hour < 18 ? 'Hallo' : 'Guten Abend';
+  const W = [...state.weights].sort((a, b) => a.d < b.d ? -1 : 1);
+  const BTN = [
+    { side: 'l', top: '17%', icon: '🥊', label: 'Training', sub: nextL ? 'Lektion ' + (lessonIndex(nextL.id) + 1) + ' · Workouts' : 'Workouts · Timer', to: 'training' },
+    { side: 'l', top: '50%', icon: '📖', label: 'Technik', sub: knownN + ' Techniken · Video', to: 'technik' },
+    { side: 'r', top: '17%', icon: '🥦', label: 'Körper', sub: 'Essen · ' + (W.length ? String(W[W.length - 1].kg).replace('.', ',') + ' kg' : 'Gewicht'), to: 'body' },
+    { side: 'r', top: '50%', icon: '🏆', label: 'Fortschritt', sub: d.rank.name + ' · ' + d.xp + ' XP', to: 'progress' },
+  ];
+  return (
+    <div className="relative -mx-4 overflow-hidden" style={{ height: 'min(120vw, 480px)' }}>
+      {state.heroImg ? <img src={state.heroImg} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ objectPosition: 'center 30%' }} /> : <RingScene lefty={lefty} />}
+      <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(10,10,10,0.75) 0%, rgba(10,10,10,0) 22%, rgba(10,10,10,0) 70%, rgba(10,10,10,1) 100%)' }}></div>
+      <div className="absolute left-4 right-4 top-3 flex items-start justify-between">
+        <div>
+          <div className="text-xs text-stone-300">{greet},</div>
+          <div className="font-display text-2xl uppercase leading-none text-white" style={{ textShadow: '0 2px 8px #000' }}>{state.profile.name || 'Champion'}</div>
+        </div>
+        <div className="text-right">
+          <div className="font-display text-2xl leading-none text-white" style={{ textShadow: '0 2px 8px #000' }}>{d.streak}🔥</div>
+          <div className="text-[9px] uppercase tracking-wider text-stone-300">Tage am Stück</div>
+        </div>
       </div>
+      {BTN.map(b => (
+        <button key={b.label} onClick={() => go(b.to)} className={'absolute w-[28%] rounded-2xl border border-gold/40 bg-ink/75 px-1.5 py-2.5 text-center shadow-lg backdrop-blur-md transition active:scale-95 ' + (b.side === 'l' ? 'left-3' : 'right-3')} style={{ top: b.top }}>
+          <div className="text-2xl leading-none">{b.icon}</div>
+          <div className="mt-1 font-display text-[13px] uppercase tracking-wide text-gold">{b.label}</div>
+          <div className="mt-0.5 text-[10px] leading-tight text-stone-400">{b.sub}</div>
+        </button>
+      ))}
+      <button onClick={() => setMenu(m => !m)} className="absolute bottom-14 right-3 rounded-full border border-white/10 bg-ink/70 px-3 py-1.5 text-[11px] text-stone-300 backdrop-blur">📷 {state.heroImg ? 'Bild ändern' : 'Eigenes Bild'}</button>
+      {menu && (
+        <div className="absolute bottom-24 right-3 z-10 w-52 rounded-2xl border border-white/10 bg-anth p-1.5 shadow-xl">
+          <button onClick={() => { setMenu(false); fref.current && fref.current.click(); }} className="w-full rounded-xl px-3 py-2.5 text-left text-sm text-stone-200">📷 Foto auswählen</button>
+          {state.heroImg && <button onClick={() => { setMenu(false); update(s => ({ ...s, heroImg: null })); }} className="w-full rounded-xl px-3 py-2.5 text-left text-sm text-stone-200">🥊 Zurück zum Boxer im Ring</button>}
+          <button onClick={() => setMenu(false)} className="w-full rounded-xl px-3 py-2 text-left text-xs text-stone-500">Abbrechen</button>
+        </div>
+      )}
+      <input ref={fref} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files && e.target.files[0]; if (f) loadPhoto(f, url => { update(s => ({ ...s, heroImg: url })); toast('Startbild gespeichert'); }, () => toast('Bild konnte nicht geladen werden')); e.target.value = ''; }} />
+    </div>
+  );
+}
+
+function Seg({ items, value, onChange }) {
+  return (
+    <div className="sticky top-0 z-20 -mx-4 mb-4 bg-ink/95 px-4 py-2 backdrop-blur" style={{ top: 0 }}>
+      <div className="flex gap-1 rounded-2xl border border-white/10 bg-anth p-1">
+        {items.map(([v, l]) => (
+          <button key={v} onClick={() => { onChange(v); window.scrollTo({ top: 0 }); }} className={'flex-1 rounded-xl px-1 py-2 text-[12px] font-medium leading-tight transition ' + (value === v ? 'bg-gold text-ink' : 'text-stone-400')}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+const AreaTitle = ({ icon, title, sub }) => (
+  <div className="mb-1">
+    <div className="font-display text-3xl uppercase leading-tight text-stone-50">{icon} {title}</div>
+    {sub && <p className="text-sm text-stone-400">{sub}</p>}
+  </div>
+);
+
+function TrainingTab({ app, sub, setSub, focusWarmup }) {
+  const { state, openLesson, startRegen, today, tKey } = app;
+  const nextL = LESSONS.find(l => !state.path.done.includes(l.id));
+  return (
+    <div>
+      <AreaTitle icon="🥊" title="Training" sub="Lektionen, fertige Workouts, Timer und Trainingsplan" />
+      <Seg value={sub} onChange={setSub} items={[['lessons', 'Lektionen'], ['workouts', 'Workouts'], ['timer', 'Timer'], ['camp', 'Fight Camp']]} />
+      {sub === 'lessons' && (
+        <div className="space-y-4">
+          {nextL ? (
+            <button onClick={() => openLesson(nextL)} className="flex w-full items-center gap-3 rounded-3xl border border-blood/50 bg-gradient-to-br from-blood/35 to-anth p-4 text-left">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-blood font-display text-2xl text-white">{lessonIndex(nextL.id) + 1}</span>
+              <span className="flex-1"><span className="block text-[11px] uppercase tracking-[0.2em] text-gold">Nächste Lektion</span><span className="block font-display text-xl uppercase leading-tight text-stone-50">{nextL.title}</span><span className="block text-xs text-stone-400">{nextL.goal}</span></span>
+              <span className="font-display text-2xl text-white">▶</span>
+            </button>
+          ) : <div className="rounded-3xl border border-gold/40 bg-gold/10 p-4 text-center font-display uppercase text-gold">Alle 24 Lektionen geschafft 🏆</div>}
+          <button onClick={startRegen} className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-anth p-3 text-left">
+            <span className="text-2xl">😌</span><span className="flex-1"><span className="block text-sm text-stone-100">Erholungstag (10 Min.)</span><span className="block text-xs text-stone-500">Locker bewegen zwischen den Lektionen</span></span><span className="text-stone-500">›</span>
+          </button>
+          <PathView app={app} />
+        </div>
+      )}
+      {sub === 'workouts' && <WorkoutsTab app={app} />}
+      <div className={sub === 'timer' ? '' : 'hidden'}><TimerPanel app={app} /></div>
+      <div className={sub === 'camp' ? '' : 'hidden'}><PlanPanel app={app} focusWarmup={focusWarmup} /></div>
+    </div>
+  );
+}
+
+function TechnikTab({ app, sub, setSub }) {
+  return (
+    <div>
+      <AreaTitle icon="📖" title="Technik" sub="Schläge lernen, dich filmen, eigene Kombis, Hände schützen" />
+      <Seg value={sub} onChange={setSub} items={[['tech', 'Techniken'], ['video', 'Video-Check'], ['combos', 'Kombis'], ['schutz', 'Schutz & Regeln']]} />
+      {sub === 'combos' ? <ComboBuilder app={app} /> : <LearnTab app={app} part={sub} />}
+    </div>
+  );
+}
+
+function BodyTab({ app, sub, setSub }) {
+  return (
+    <div>
+      <AreaTitle icon="🥦" title="Körper" sub="Essen, Trinken, Schlaf und Gewicht" />
+      <Seg value={sub} onChange={setSub} items={[['food', 'Essen'], ['shop', 'Einkauf'], ['drink', 'Trinken & Schlaf'], ['weight', 'Gewicht']]} />
+      {sub === 'food' && <FoodPanel app={app} section="food" />}
+      {sub === 'shop' && <ShoppingList app={app} />}
+      {sub === 'drink' && <FoodPanel app={app} section="drink" />}
+      {sub === 'weight' && <div className="space-y-4"><WeightCard app={app} /><p className="px-1 text-xs text-stone-500">Wenn du dein Gewicht einträgst, passt sich dein Essensplan automatisch an.</p></div>}
+    </div>
+  );
+}
+
+function ProgressHub({ app, sub, setSub }) {
+  return (
+    <div>
+      <AreaTitle icon="🏆" title="Fortschritt" sub="Was du schon geschafft hast" />
+      <Seg value={sub} onChange={setSub} items={[['overview', 'Übersicht'], ['challenges', 'Challenges'], ['trophies', 'Ränge & Trophäen']]} />
+      <ProgressTab app={app} part={sub} />
+    </div>
+  );
+}
+
+function SettingsPage({ app, onBack }) {
+  return (
+    <div>
+      <button onClick={onBack} className="mb-3 flex items-center gap-2 text-sm text-stone-400">← Zurück</button>
+      <AreaTitle icon="⚙️" title="Einstellungen" />
+      <div className="mt-3"><SettingsPanel app={app} /></div>
     </div>
   );
 }
